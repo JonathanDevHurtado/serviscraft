@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Serviscraft
+GenericName=Minecraft server manager
+GenericName[es]=Gestor de servidores de Minecraft
+Comment=Create and manage Minecraft servers (Vanilla, Paper, Fabric, Forge) with rootless Podman
+Comment[es]=Crea y administra servidores de Minecraft (Vanilla, Paper, Fabric, Forge) con Podman sin privilegios
+Exec=serviscraft
+TryExec=serviscraft
+Icon=serviscraft
+Terminal=false
+Categories=Game;
+Keywords=minecraft;server;servidor;podman;container;contenedor;
+Keywords[es]=minecraft;servidor;podman;contenedor;mundos;
+StartupNotify=true
+StartupWMClass=serviscraft
+SingleMainWindow=true

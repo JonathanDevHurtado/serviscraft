@@ -1,0 +1,97 @@
+# Licencia propietaria de Serviscraft
+
+**Copyright © 2026 Jonathan Hurtado (JonathanDevHurtado). Todos los derechos
+reservados.**
+
+Serviscraft es un programa **propietario**. El código fuente se publica para que
+cualquiera pueda **leerlo, estudiarlo y auditar su seguridad**, pero eso **no**
+lo convierte en software libre ni concede permiso para reutilizarlo.
+
+## 1. Lo que sí puedes hacer
+
+1. **Leer y estudiar** el código fuente publicado en este repositorio, y citarlo
+   en reseñas, análisis técnicos o trabajos académicos indicando claramente su
+   autoría y un enlace a este repositorio.
+2. **Descargar y ejecutar** las versiones oficiales publicadas en la sección
+   *Releases* de este repositorio, de forma gratuita, para uso **personal y no
+   comercial**.
+3. **Hacer copias de seguridad** de los paquetes oficiales que hayas descargado,
+   siempre que no las distribuyas a terceros.
+
+## 2. Lo que NO puedes hacer sin permiso previo y por escrito
+
+Salvo en los casos del apartado 1, no se concede ningún derecho. En particular,
+**no puedes**:
+
+1. Copiar, reproducir, distribuir, publicar, subir a otro repositorio, espejar,
+   empaquetar ni poner a disposición de terceros el código fuente, ni total ni
+   parcialmente.
+2. Modificar, adaptar, traducir, descompilar, desensamblar ni crear obras
+   derivadas del código o de los binarios.
+3. Usar el código, los binarios o partes de ellos en **otro programa**, producto
+   o servicio, ni comercial ni no comercial.
+4. **Vender, alquilar, sublicenciar** o explotar comercialmente Serviscraft, sus
+   binarios o cualquier obra derivada.
+5. Redistribuir los paquetes oficiales (RPM, DEB, AppImage u otros) en webs,
+   tiendas, repositorios, torrents o medios físicos.
+6. Eliminar, ocultar o alterar los avisos de autoría, la licencia o las marcas.
+7. Usar el nombre «Serviscraft», su icono o su identidad visual de forma que
+   sugiera una versión oficial, una afiliación o un respaldo que no existe.
+
+Tampoco se aceptan contribuciones de código (pull requests) sin un acuerdo
+previo por escrito que regule la titularidad de los derechos. Si envías una
+contribución sin ese acuerdo, no se incorporará.
+
+## 3. Componentes de terceros
+
+Serviscraft usa bibliotecas y programas de terceros (PySide6/Qt, Python, Podman,
+etc.) que conservan **sus propias licencias**. Esta licencia no altera ni
+restringe los derechos que esas licencias te concedan sobre dichos componentes.
+Consulta [`TERCEROS.md`](TERCEROS.md).
+
+Las texturas, skins e iconos de Minecraft que la aplicación descarga en tiempo de
+ejecución **no se distribuyen** con el programa: se piden a sus servidores de
+origen y se guardan en la caché del usuario. «Minecraft» es una marca de Mojang
+AB; Serviscraft no está afiliado a Mojang ni a Microsoft.
+
+## 4. Datos del usuario
+
+Esta licencia se aplica al **software**. Los mundos, configuraciones, copias de
+seguridad y demás datos que crees con Serviscraft son **tuyos** y no se ven
+afectados por estas condiciones.
+
+## 5. Garantías y responsabilidad
+
+EL SOFTWARE SE PROPORCIONA «TAL CUAL», SIN GARANTÍA DE NINGÚN TIPO, EXPRESA O
+IMPLÍCITA, INCLUIDAS, ENTRE OTRAS, LAS GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD
+PARA UN FIN CONCRETO Y NO INFRACCIÓN. EN NINGÚN CASO EL TITULAR SERÁ RESPONSABLE
+DE DAÑOS DIRECTOS, INDIRECTOS, INCIDENTALES, ESPECIALES O CONSECUENTES (INCLUIDA
+LA PÉRDIDA DE DATOS, DE MUNDOS O DE BENEFICIOS) DERIVADOS DEL USO O DE LA
+IMPOSIBILIDAD DE USO DEL SOFTWARE, AUNQUE SE HAYA ADVERTIDO DE ESA POSIBILIDAD.
+
+Haz siempre copias de seguridad de tus mundos. Serviscraft incluye copias
+automáticas, pero ninguna copia sustituye a una copia externa.
+
+## 6. Terminación
+
+Cualquier uso no autorizado termina automáticamente los permisos del apartado 1.
+Al terminar, debes dejar de usar el software y destruir las copias que hayas
+hecho, salvo las que la ley te obligue a conservar.
+
+## 7. Legislación aplicable
+
+Estas condiciones se rigen por la legislación aplicable en el domicilio del
+titular, sin perjuicio de las normas imperativas que protejan al consumidor en
+tu país. Si alguna cláusula se declara nula, el resto seguirá siendo válido.
+
+## 8. Permisos y contacto
+
+Para pedir permiso para un uso distinto (por ejemplo, integrar Serviscraft en tu
+empresa, redistribuirlo o crear una versión derivada), abre una consulta en el
+perfil de GitHub del titular: <https://github.com/JonathanDevHurtado>.
+
+---
+
+*Este texto es una licencia propietaria, no una licencia de código abierto. No
+es asesoramiento jurídico: si necesitas una licencia a medida para un uso
+comercial, consulta con un profesional.*

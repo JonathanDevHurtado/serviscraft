@@ -1,0 +1,33 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Herramientas de pruebas y cobertura
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.log
+build/
+dist/
+
+# Artefactos de empaquetado
+packaging/build/
+*.rpm
+*.deb
+*.AppImage
+*.tar.gz
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*~

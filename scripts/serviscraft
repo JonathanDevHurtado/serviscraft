@@ -1,0 +1,20 @@
+#!/bin/sh
+# Lanzador de Serviscraft instalado en /usr/bin (rpm y deb).
+#
+# Se limita a localizar un interprete de Python 3 e iniciar el paquete
+# `serviscraft`. Toda la logica vive en Python; este script no hace nada mas,
+# y en particular nunca invoca `sudo` ni `podman` directamente.
+
+set -eu
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "serviscraft: no se encontro python3 en el PATH." >&2
+    echo "Instala Python 3 (paquete 'python3') y vuelve a intentarlo." >&2
+    exit 1
+fi
+
+# Nunca permitir que un motor Podman remoto se use por accidente: la API de
+# Podman jamas se expone por TCP.
+unset CONTAINER_HOST DOCKER_HOST CONTAINER_CONNECTION 2>/dev/null || true
+
+exec python3 -s -m serviscraft "$@"

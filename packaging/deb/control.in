@@ -1,0 +1,23 @@
+Package: serviscraft
+Version: @VERSION@
+Section: games
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.10), python3-pyside6.qtcore | python3-pyside6, python3-pyside6.qtgui | python3-pyside6, python3-pyside6.qtwidgets | python3-pyside6, podman
+Installed-Size: @INSTALLED_SIZE@
+Maintainer: Jonathan Hurtado <JonathanHurtadoDev@proton.me>
+Homepage: https://github.com/JonathanDevHurtado/serviscraft
+Description: Gestor grafico de servidores de Minecraft sobre Podman rootless
+ Serviscraft es una aplicacion de escritorio para KDE que crea y administra
+ servidores de Minecraft (Vanilla, Paper, Fabric y Forge) usando contenedores
+ Podman sin privilegios.
+ .
+ Cada servidor corre en su propio contenedor rootless, con su mundo persistente
+ en una carpeta del usuario. La interfaz permite iniciar, detener y reiniciar
+ servidores, seguir la consola en tiempo real, enviar comandos, editar
+ server.properties, gestionar pluguins, mods y mundos, crear copias de
+ seguridad y ver el consumo de CPU y memoria.
+ .
+ Seguridad: nunca se ejecuta Podman con sudo, la API de Podman no se expone por
+ TCP, el cortafuegos no se modifica y ninguna accion destructiva se ejecuta sin
+ confirmacion explicita.
