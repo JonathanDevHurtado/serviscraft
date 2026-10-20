@@ -8,6 +8,7 @@ No lanzan ningun contenedor.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -2937,11 +2938,15 @@ class TestIconosDeContenido:
 class TestAspectoDelServidor:
     """Imagen y descripcion con las que se ve el servidor antes de entrar."""
 
-    def _esperar_tarea(self, qapp: QApplication, condicion, intentos: int = 300) -> None:
+    def _esperar_tarea(self, qapp: QApplication, condicion, intentos: int = 500) -> None:
+        # ``processEvents`` solo no basta en un equipo lento: el hilo de la
+        # tarea necesita tiempo real para arrancar. Con 500 x 10 ms damos hasta
+        # cinco segundos, sin frenar las pruebas cuando termina antes.
         for _ in range(intentos):
             qapp.processEvents()
             if condicion():
                 return
+            time.sleep(0.01)
         qapp.processEvents()
         assert condicion(), "la tarea de fondo no termino a tiempo"
 

@@ -37,8 +37,8 @@ class TestServerType:
 
 class TestServerState:
     def test_etiquetas(self) -> None:
-        assert ServerState.RUNNING.label == "En ejecucion"
-        assert ServerState.CREATED.label == "Creado (sin iniciar)"
+        assert ServerState.RUNNING.label == "En marcha"
+        assert ServerState.CREATED.label == "Sin iniciar"
 
     def test_is_running(self) -> None:
         assert ServerState.RUNNING.is_running

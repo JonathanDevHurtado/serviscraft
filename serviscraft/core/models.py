@@ -91,11 +91,11 @@ class ServerState(str, Enum):
     @property
     def label(self) -> str:
         return {
-            ServerState.RUNNING: "En ejecucion",
+            ServerState.RUNNING: "En marcha",
             ServerState.EXITED: "Detenido",
-            ServerState.CREATED: "Creado (sin iniciar)",
+            ServerState.CREATED: "Sin iniciar",
             ServerState.PAUSED: "Pausado",
-            ServerState.MISSING: "Sin contenedor",
+            ServerState.MISSING: "Sin crear",
             ServerState.UNKNOWN: "Desconocido",
         }[self]
 

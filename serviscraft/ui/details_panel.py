@@ -128,12 +128,12 @@ class DetailsPanel(QWidget):
         ):
             self._add_row(resources_form, key, label)
 
-        copy_row = QHBoxLayout()
         copy_button = make_button("Copiar direccion", icon_names=("edit-copy",))
         copy_button.clicked.connect(self._copy_address)
-        copy_row.addWidget(copy_button)
-        copy_row.addStretch(1)
-        resources_form.addRow("", self._wrap(copy_row))
+        # Ocupa las dos columnas del formulario: en una ventana estrecha, la
+        # columna de los valores se queda sin sitio y el boton se salia por la
+        # derecha (pasaba con fuentes mas anchas que las de Fedora).
+        resources_form.addRow(copy_button)
         layout.addWidget(resources)
 
         # --------------------------------------------------------------- tiempos

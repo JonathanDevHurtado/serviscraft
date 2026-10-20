@@ -455,7 +455,7 @@ class MainWindow(QMainWindow):
         header_layout.addLayout(top)
 
         # El estado va en la segunda linea, junto al resumen: asi el titulo no
-        # compite por el ancho con la insignia (que con «Creado (sin iniciar)» es
+        # compite por el ancho con la insignia (que con «Sin iniciar» es
         # ancha) y el nombre del servidor siempre tiene sitio.
         subtitle_row = QHBoxLayout()
         subtitle_row.setSpacing(10)

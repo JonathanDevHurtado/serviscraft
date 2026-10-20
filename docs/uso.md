@@ -67,8 +67,7 @@ Al aceptar, Serviscraft:
 2. Crea la carpeta de datos y un `server.properties` inicial.
 3. **Crea el contenedor pero no lo inicia.**
 
-Una etiqueta de estado te indica siempre la situación: *Creado (sin iniciar)*,
-*En ejecución*, *Detenido*, *Sin contenedor*.
+Una etiqueta de estado te indica siempre la situación: *Sin iniciar*, *En marcha*, *Detenido*, *Sin crear*.
 
 ## 2. Ciclo de vida
 
