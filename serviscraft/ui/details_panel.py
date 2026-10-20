@@ -30,7 +30,7 @@ from .tasks import TaskRunner
 logger = get_logger("ui.details")
 
 
-def _make_form(parent: QWidget) -> QFormLayout:
+def _make_form(parent: QWidget | None) -> QFormLayout:
     """Crea un formulario cuyas etiquetas de valor se estiran y ajustan bien.
 
     Importante: el estilo Breeze usa ``ExpandingFieldsGrow``, que **no** estira los
@@ -59,7 +59,7 @@ class DetailsPanel(QWidget):
         self.runner = runner
         self._spec: ServerSpec | None = None
         self._state = ServerState.MISSING
-        self._labels: dict[str, QLabel] = {}
+        self._labels: dict[str, QLabel | QLineEdit] = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -79,10 +79,10 @@ class DetailsPanel(QWidget):
         for key, label in (
             ("name", "Nombre"),
             ("id", "Identificador"),
-            ("type", "Tipo de servidor"),
-            ("version", "Version de Minecraft"),
-            ("image", "Imagen OCI"),
-            ("java", "Java del contenedor"),
+            ("type", "Tipo"),
+            ("version", "Minecraft"),
+            ("image", "Imagen"),
+            ("java", "Java"),
         ):
             self._add_row(identity_form, key, label)
         self.badge = StatusBadge()
@@ -100,7 +100,7 @@ class DetailsPanel(QWidget):
         aspect_layout.addWidget(self.mc_preview)
         aspect_row = QHBoxLayout()
         self.appearance_button = make_button(
-            "Cambiar imagen y descripcion...",
+            "Cambiar aspecto...",
             icon_names=("preferences-desktop-theme", "image-x-generic"),
             tooltip="Elegir el icono y el mensaje con colores que se ven en la lista de Minecraft",
         )
@@ -116,24 +116,27 @@ class DetailsPanel(QWidget):
 
         # ----------------------------------------------------------- recursos
         resources = QGroupBox("Recursos y puertos")
-        resources_form = _make_form(resources)
+        # El formulario y el boton van en el mismo QVBoxLayout, no dentro del
+        # formulario: una fila con dos columnas suma el ancho de la etiqueta mas
+        # el del boton, y en una ventana estrecha eso empujaba el panel fuera de
+        # la ventana. Como fila aparte, el minimo es el mayor de los dos.
+        resources_layout = QVBoxLayout(resources)
+        resources_form = _make_form(None)
+        resources_layout.addLayout(resources_form)
         for key, label in (
-            ("memory", "Memoria del servidor (heap)"),
-            ("memory_limit", "Limite del contenedor"),
-            ("port", "Puerto del servidor"),
-            ("rcon", "Puerto de consola (solo local)"),
-            ("bedrock", "Jugadores de Bedrock"),
-            ("address", "Direccion para conectarse"),
-            ("disk", "Espacio ocupado en disco"),
+            ("memory", "Memoria (heap)"),
+            ("memory_limit", "Limite"),
+            ("port", "Puerto"),
+            ("rcon", "Consola (local)"),
+            ("bedrock", "Bedrock"),
+            ("address", "Direccion"),
+            ("disk", "En disco"),
         ):
             self._add_row(resources_form, key, label)
 
         copy_button = make_button("Copiar direccion", icon_names=("edit-copy",))
         copy_button.clicked.connect(self._copy_address)
-        # Ocupa las dos columnas del formulario: en una ventana estrecha, la
-        # columna de los valores se queda sin sitio y el boton se salia por la
-        # derecha (pasaba con fuentes mas anchas que las de Fedora).
-        resources_form.addRow(copy_button)
+        resources_layout.addWidget(copy_button, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(resources)
 
         # --------------------------------------------------------------- tiempos
@@ -141,10 +144,10 @@ class DetailsPanel(QWidget):
         times_form = _make_form(times)
         for key, label in (
             ("created", "Creado"),
-            ("started", "Ultimo arranque"),
+            ("started", "Arranque"),
             ("container", "Contenedor"),
-            ("data_path", "Carpeta de datos"),
-            ("backups_path", "Carpeta de copias"),
+            ("data_path", "Datos"),
+            ("backups_path", "Copias"),
         ):
             self._add_row(times_form, key, label, selectable=True)
         layout.addWidget(times)
@@ -187,7 +190,11 @@ class DetailsPanel(QWidget):
         backups_button = make_button("Abrir carpeta de copias", icon_names=("folder-", "archive-insert-directory"))
         backups_button.clicked.connect(lambda: self._open_path("backups"))
         self.maintenance_row2.add(backups_button)
-        log_button = make_button("Ver registro de Serviscraft", icon_names=("text-x-generic",))
+        log_button = make_button(
+            "Ver registro",
+            icon_names=("text-x-generic",),
+            tooltip="Abrir el registro de Serviscraft",
+        )
         log_button.clicked.connect(self._open_log)
         self.maintenance_row2.add(log_button)
         actions_layout.addWidget(self.maintenance_row2)
@@ -210,10 +217,25 @@ class DetailsPanel(QWidget):
         return widget
 
     def _add_row(self, form: QFormLayout, key: str, label: str, *, selectable: bool = False) -> None:
-        value = QLabel("—")
-        value.setWordWrap(True)
         if selectable:
-            value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            # Una ruta larga en una QLabel obliga a ensanchar toda la ficha: la
+            # etiqueta no puede partir el texto y su ancho minimo es el de la
+            # ruta entera. Un campo de solo lectura se desplaza, se puede
+            # seleccionar y no impone ese ancho.
+            campo = QLineEdit()
+            campo.setReadOnly(True)
+            campo.setFrame(False)
+            campo.setStyleSheet("QLineEdit { background: transparent; border: 0; padding: 0; }")
+
+            def _sincronizar(texto: str) -> None:
+                campo.setCursorPosition(0)
+                campo.setToolTip(texto)
+
+            campo.textChanged.connect(_sincronizar)
+            value: QLabel | QLineEdit = campo
+        else:
+            value = QLabel("—")
+            value.setWordWrap(True)
         form.addRow(label, value)
         self._labels[key] = value
 
