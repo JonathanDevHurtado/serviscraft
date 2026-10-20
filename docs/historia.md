@@ -706,3 +706,8 @@ Serviscraft no pretende ser el gestor de servidores más completo del mundo.
 Pretende ser **el que te deja jugar con tus amigos sin pedirte la contraseña de
 administrador y sin llevarse tus mundos a otro sitio**. Todo lo demás se hizo
 alrededor de esa idea.
+
+---
+
+**Autor:** Jonathan Hurtado — [JonathanHurtadoDev@proton.me](mailto:JonathanHurtadoDev@proton.me)
+· [@JonathanDevHurtado](https://github.com/JonathanDevHurtado)

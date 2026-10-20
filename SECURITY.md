@@ -14,8 +14,8 @@ Advisories → Report a vulnerability** del repositorio de GitHub:
 
 <https://github.com/JonathanDevHurtado/serviscraft/security/advisories/new>
 
-Si no puedes usar esa vía, abre un issue **sin detalles sensibles** pidiendo
-contacto privado.
+Si no puedes usar esa vía, escribe a **JonathanHurtadoDev@proton.me** o abre un
+issue **sin detalles sensibles** pidiendo contacto privado.
 
 Incluye, si puedes:
 

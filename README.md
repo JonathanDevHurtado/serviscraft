@@ -271,6 +271,17 @@ consentimiento, y **no borra nada** sin pedirte confirmación.
 - **Siguiente paso:** rediseño visual global tipo launcher (el resto de la
   0.8.0 está cerrado).
 
+## Autor
+
+**Jonathan Hurtado** — autor y mantenedor de Serviscraft.
+
+- **Contacto:** [JonathanHurtadoDev@proton.me](mailto:JonathanHurtadoDev@proton.me)
+- **GitHub:** [@JonathanDevHurtado](https://github.com/JonathanDevHurtado)
+- **Proyecto:** <https://github.com/JonathanDevHurtado/serviscraft>
+
+Para permisos de uso comercial, redistribución o cualquier duda sobre la
+licencia, escribe al correo indicado.
+
 ## Licencia
 
 **Propietaria.** El código se publica para que se pueda **leer y auditar**, pero
