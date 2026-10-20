@@ -1,0 +1,61 @@
+name: Informe de error
+description: Algo no funciona como debería
+title: "[Error] "
+labels: ["error"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por tomarte el tiempo de informar. Cuanto más concreto sea el
+        informe, antes se puede reproducir y arreglar.
+
+        **No publiques aquí vulnerabilidades de seguridad**: usa
+        [SECURITY.md](../SECURITY.md).
+
+  - type: input
+    id: version
+    attributes:
+      label: Versión de Serviscraft
+      description: La salida de `serviscraft --self-test` (primera línea).
+      placeholder: "Serviscraft 0.8.0"
+    validations:
+      required: true
+
+  - type: input
+    id: entorno
+    attributes:
+      label: Distribución, escritorio y Podman
+      placeholder: "Fedora 44, KDE Plasma 6 (Wayland), Podman 5.8.9 rootless"
+    validations:
+      required: true
+
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Pasos para reproducirlo
+      description: Qué hiciste, en orden, y con qué servidor (tipo, versión, mods…).
+      placeholder: |
+        1. Abrí Serviscraft
+        2. Seleccioné el servidor X
+        3. Pulsé «...»
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Qué esperabas y qué pasó
+    validations:
+      required: true
+
+  - type: textarea
+    id: registro
+    attributes:
+      label: Registro o captura (opcional)
+      description: |
+        El registro está en `~/.cache/serviscraft/` (o el que indique
+        `--self-test`). Recorta lo que no sea relevante.
+      render: text
+    validations:
+      required: false

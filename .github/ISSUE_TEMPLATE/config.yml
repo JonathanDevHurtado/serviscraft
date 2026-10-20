@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Seguridad
+    url: https://github.com/JonathanDevHurtado/serviscraft/security/advisories/new
+    about: Informa de una vulnerabilidad en privado, no en un issue público.
+  - name: Documentación
+    url: https://github.com/JonathanDevHurtado/serviscraft/tree/main/docs
+    about: Instalación, uso, seguridad, desarrollo e historia del proyecto.

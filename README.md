@@ -1,6 +1,27 @@
-# Serviscraft
+<p align="center">
+  <a href="capturas/banner.png">
+    <img src="capturas/banner.png" alt="Serviscraft: servidores de Minecraft con Podman rootless y sin sudo" width="900">
+  </a>
+</p>
 
-**Gestor gráfico de servidores de Minecraft sobre Podman rootless, para KDE Plasma.**
+<h1 align="center">
+  <img src="capturas/logo.png" alt="" width="76" align="middle">
+  Serviscraft
+</h1>
+
+<p align="center">
+  <strong>Gestor gráfico de servidores de Minecraft sobre Podman rootless, para KDE Plasma.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.8.0-3FA34D?style=flat-square" alt="Versión 0.8.0">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10 o superior">
+  <img src="https://img.shields.io/badge/PySide6-Qt%206-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PySide6 y Qt 6">
+  <img src="https://img.shields.io/badge/Podman-rootless-892CA0?style=flat-square&logo=podman&logoColor=white" alt="Podman rootless">
+  <img src="https://img.shields.io/badge/Linux-KDE%20Plasma-1D99F3?style=flat-square&logo=kde&logoColor=white" alt="Linux con KDE Plasma">
+  <img src="https://img.shields.io/badge/pruebas-776%20en%20verde-3FA34D?style=flat-square" alt="776 pruebas en verde">
+  <img src="https://img.shields.io/badge/licencia-propietaria-C0392B?style=flat-square" alt="Licencia propietaria">
+</p>
 
 Serviscraft crea y administra servidores de Minecraft (**Vanilla, Paper, Fabric,
 Forge y modpacks de Modrinth**) como contenedores Podman **sin privilegios**, con
@@ -10,6 +31,25 @@ KDE y funciona tanto en X11 como en Wayland.
 <p align="center">
   <em>Interfaz en español, tema claro y oscuro, sin usar nunca <code>sudo</code>.</em>
 </p>
+
+## Por qué Serviscraft
+
+La idea es tener **algo parecido a Aternos, pero en tu ordenador y con tus
+datos**. Eso obligó a tomar decisiones que se notan por dentro y por fuera:
+
+- **Sin `sudo` y sin demonio con privilegios.** Todo corre con tu usuario en
+  Podman rootless. La API de Podman nunca se expone por TCP.
+- **El servidor es de verdad.** Mundo, plugins o mods, consola, RCON y copias
+  reales. Nada de esconder el juego detrás de una capa opaca.
+- **Tus datos, en tu casa.** Mundos, configuración y copias viven en
+  `~/.local/share/serviscraft`, siempre tuyos.
+- **Actualizar no puede borrar.** `META_VERSION`, migraciones explícitas y
+  copias manuales que nunca se limpian solas.
+- **Fácil para quien solo quiere jugar.** Y auditable para quien quiere leer el
+  código: núcleo sin Qt, una sola puerta a Podman y [776 pruebas](tests/).
+
+La historia completa, decisión por decisión y problema por problema, está en
+[`docs/historia.md`](docs/historia.md).
 
 <p align="center">
   <a href="capturas/01-jugadores.png">
@@ -49,6 +89,48 @@ KDE y funciona tanto en X11 como en Wayland.
 | Estadísticas | Barras con el aspecto de la **experiencia de Minecraft**: CPU como porcentaje del equipo (nunca más del 100 %) y memoria respecto a la asignada, con el detalle de núcleos al pasar el ratón. |
 | Archivos a mano | Botones y menús para abrir la carpeta de datos y la de copias de cada servidor, con la ruta siempre a la vista. |
 | Varios servidores | Cada servidor es independiente, con su propio contenedor, mundo, puerto y carpeta. **Detener todos** apaga de golpe los que estén en marcha y el estado que se ve es siempre el real de Podman. |
+
+## Tecnologías
+
+| Tecnología | Para qué se usa | Por qué esa y no otra |
+| --- | --- | --- |
+| **Python 3.10+** | Lenguaje de toda la aplicación. | Lógica legible y auditable, sin dependencias de compilación, disponible en cualquier distribución. |
+| **PySide6 / Qt 6** | Interfaz gráfica. | Ventana nativa en KDE, X11 y Wayland, con tema claro/oscuro y un solo lenguaje para todo el programa. |
+| **Podman rootless** | Ejecutar cada servidor en su contenedor. | **Sin `sudo`, sin demonio root y sin exponer la API por TCP.** Se llama al binario con listas de argumentos, y solo se tocan contenedores `serviscraft-*`. |
+| **Imagen OCI `itzg/minecraft-server`** | El servidor de Minecraft en sí. | Una imagen universal: `TYPE` elige Vanilla, Paper, Fabric o Forge y `java8/17/21/25` la versión de Java. Menos imágenes que mantener. |
+| **RCON** | Consola, comandos y jugadores con el servidor encendido. | Es el protocolo del propio juego y va por `127.0.0.1`. Con el servidor apagado, las listas se editan en `whitelist.json`, `ops.json` y `banned-players.json` con el **UUID offline** de Java. |
+| **API de Modrinth** | Catálogo de mods, plugins y modpacks. | Datos del proyecto (cargador, versiones de Minecraft, descargas, fecha) y **verificación SHA-512** de cada descarga. |
+| **DuckDNS** | Nombre para conectarse desde fuera. | Un nombre que se recuerda (`nombre.duckdns.org:puerto`) en vez de una IP, con actualización automática al arrancar. |
+| **XDG Base Directory** | Datos, configuración y caché. | Integración limpia con el escritorio; `SERVISCRAFT_HOME` permite un modo portátil. |
+| **pytest + pytest-qt** | Pruebas. | **776 casos** con la ventana real en plataforma `offscreen`, sin lanzar contenedores. Una prueba verifica que `core/` no importa Qt. |
+| **RPM + DEB + AppImage** | Distribución. | Paquete nativo para Fedora/KDE y para Debian/Ubuntu, y un AppImage portátil. Cada uno verifica su versión con `serviscraft --self-test`. |
+| **GitHub Actions** | Integración continua. | La suite completa en cada push y en cada *pull request*. |
+| **QSS sobre la paleta de KDE** | Aspecto. | Tema claro y oscuro que encaja con el escritorio, e **iconos dibujados a mano** para lo que un tema no tiene. |
+
+## Arquitectura en 10 segundos
+
+```
+┌──────────────────────────────────────────────────────┐
+│  ui/  (PySide6)   ventanas, diálogos, estilos        │
+└──────────────────────────┬───────────────────────────┘
+                           │  métodos y dataclasses
+┌──────────────────────────▼───────────────────────────┐
+│  core/  (Python puro, SIN Qt)                        │
+│  manager · podman · store · backup · players · …     │
+└──────────────────────────┬───────────────────────────┘
+                           │  listas de argumentos
+┌──────────────────────────▼───────────────────────────┐
+│  podman rootless  →  contenedor itzg/minecraft-server │
+└──────────────────────────────────────────────────────┘
+```
+
+- **La interfaz no ejecuta comandos**: todo pasa por `ServerManager`.
+- **El estado no se inventa**: se pregunta a Podman; la ficha solo guarda la
+  configuración.
+- **Una ficha rota no tumba la lista**: cada servidor se carga por separado.
+- El viaje completo de una orden, la estructura de carpetas y las migraciones
+  están explicados en [`docs/historia.md`](docs/historia.md) y
+  [`docs/desarrollo.md`](docs/desarrollo.md).
 
 ## Capturas
 
@@ -110,6 +192,22 @@ chmod +x dist/Serviscraft-*.AppImage
 ./dist/Serviscraft-*.AppImage
 ```
 
+### Verificar la descarga
+
+Cada *Release* publica un fichero `SHA256SUMS-0.8.0.txt` con el hash de los tres
+paquetes y del código fuente. Para comprobar que la descarga está íntegra:
+
+```bash
+sha256sum -c SHA256SUMS-0.8.0.txt
+```
+
+Y para comprobar que el entorno está listo (Podman rootless, PySide6 y la
+versión correcta):
+
+```bash
+serviscraft --self-test
+```
+
 ### Desde el código fuente
 
 ```bash
@@ -162,6 +260,16 @@ La documentación completa está en [`docs/`](docs/):
 Serviscraft **nunca** ejecuta Podman con `sudo`, **nunca** expone la API de
 Podman por TCP, **nunca** modifica el cortafuegos ni abre puertos sin tu
 consentimiento, y **no borra nada** sin pedirte confirmación.
+
+## Estado del proyecto
+
+- **Versión estable actual:** 0.8.0 (octubre de 2026).
+- **Pruebas:** 776 en verde (`pytest`, plataforma `offscreen`).
+- **Desarrollo y pruebas:** Fedora 44 con KDE Plasma; la interfaz está pensada
+  para X11 y Wayland.
+- **Paquetes:** RPM, DEB y AppImage, todos verificados con `--self-test`.
+- **Siguiente paso:** rediseño visual global tipo launcher (el resto de la
+  0.8.0 está cerrado).
 
 ## Licencia
 
