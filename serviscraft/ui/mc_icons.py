@@ -713,6 +713,49 @@ def icono_conectar(size: int = 48) -> QPixmap:
 
 
 @lru_cache(maxsize=32)
+def icono_ajustes(size: int = SIZE) -> QPixmap:
+    """Panel de piedra con tres mandos: los ajustes del servidor.
+
+    Es el icono de la pestana «Propiedades»: se pinta con cuadrados duros, como
+    los botones de Minecraft, para que se reconozca sin leer el titulo.
+    """
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+    s = float(size)
+
+    # Base de piedra con bisel: luz arriba e izquierda, sombra abajo y derecha.
+    _relleno(painter, "#8b8f94")
+    painter.drawRect(QRectF(0.06 * s, 0.06 * s, 0.88 * s, 0.88 * s))
+    _relleno(painter, "#b6bac0")
+    painter.drawRect(QRectF(0.06 * s, 0.06 * s, 0.88 * s, 0.08 * s))
+    painter.drawRect(QRectF(0.06 * s, 0.06 * s, 0.08 * s, 0.88 * s))
+    _relleno(painter, "#4e5257")
+    painter.drawRect(QRectF(0.06 * s, 0.86 * s, 0.88 * s, 0.08 * s))
+    painter.drawRect(QRectF(0.86 * s, 0.06 * s, 0.08 * s, 0.88 * s))
+
+    _lapiz(painter, "#3b3f43", grosor=max(1.0, size / 16.0))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRect(QRectF(0.06 * s, 0.06 * s, 0.88 * s, 0.88 * s))
+
+    mandos = (
+        (0.28, "#3FA34D", 0.34),
+        (0.50, "#f2c14e", 0.68),
+        (0.72, "#d95a4e", 0.46),
+    )
+    for y, color, posicion in mandos:
+        _relleno(painter, "#4a4e53")
+        painter.drawRect(QRectF(0.18 * s, (y - 0.035) * s, 0.64 * s, 0.07 * s))
+        _relleno(painter, color)
+        painter.drawRect(QRectF((posicion - 0.07) * s, (y - 0.10) * s, 0.14 * s, 0.20 * s))
+        _lapiz(painter, "#2e3236", grosor=max(1.0, size / 20.0))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(QRectF((posicion - 0.07) * s, (y - 0.10) * s, 0.14 * s, 0.20 * s))
+    painter.end()
+    return pixmap
+
+
+@lru_cache(maxsize=32)
 def icono_copiar(size: int = SIZE) -> QPixmap:
     """Dos hojas superpuestas: copiar una direccion al portapapeles.
 

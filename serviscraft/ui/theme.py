@@ -320,6 +320,195 @@ def build_stylesheet(palette: QPalette) -> str:
         color: rgba(255, 255, 255, 0.70);
     }}
 
+    /* ------------------------------------------ propiedades: tarjetas y mandos */
+    QFrame#PropertiesHero {{
+        background: transparent;
+        border: none;
+    }}
+    QLabel#PropertiesHeroTitle {{
+        color: #ffffff;
+        font-size: 16pt;
+        font-weight: 800;
+        letter-spacing: 1px;
+    }}
+    QLabel#PropertiesHeroSubtitle {{
+        color: rgba(255, 255, 255, 0.88);
+        font-size: 9.5pt;
+    }}
+    QLabel#PropertiesHeroIcon {{
+        background: transparent;
+    }}
+    QToolButton#PropertiesHeroHelp {{
+        background: rgba(255, 255, 255, 0.16);
+        border: 2px solid rgba(255, 255, 255, 0.62);
+        border-radius: 2px;
+        color: #ffffff;
+        font-weight: 700;
+    }}
+    QToolButton#PropertiesHeroHelp:hover {{
+        background: rgba(255, 255, 255, 0.30);
+        border-color: rgba(255, 255, 255, 0.92);
+    }}
+    QFrame#PropertyCard {{
+        background: {_rgba(card_bg, 0.70)};
+        border: 2px solid {_rgba(border, 0.50)};
+        border-radius: 3px;
+    }}
+    QFrame#PropertyCard[accent="green"] {{
+        border-color: {_rgba(QColor("#2E7D3A"), 0.60)};
+    }}
+    QFrame#PropertyCard[accent="gold"] {{
+        border-color: {_rgba(QColor("#A87B24"), 0.62)};
+    }}
+    QFrame#PropertyCard[accent="blue"] {{
+        border-color: {_rgba(QColor("#2C739B"), 0.62)};
+    }}
+    QFrame#PropertyCard[accent="brown"] {{
+        border-color: {_rgba(QColor("#8A5A2B"), 0.62)};
+    }}
+    QFrame#PropertyCard QLabel#SectionTitle {{
+        font-size: 12.5pt;
+        font-weight: 800;
+        color: {_rgba(text, 0.92)};
+    }}
+    QLabel#PropertyName {{
+        color: {text.name()};
+        font-size: 10.5pt;
+        font-weight: 700;
+    }}
+    QLabel#PropertyHint {{
+        color: {_rgba(text, 0.60)};
+        font-size: 8.8pt;
+        padding-top: 1px;
+    }}
+    QWidget#PropertiesBasicPage,
+    QWidget#PropertiesBasicContent {{
+        background: transparent;
+    }}
+    QTabWidget#PropertiesTabs::pane {{
+        background: {_rgba(card_bg, 0.38)};
+        border: 2px solid {_rgba(border, 0.50)};
+        border-radius: 3px;
+        top: -2px;
+    }}
+    QTabWidget#PropertiesTabs QTabBar::tab {{
+        background: {_rgba(text, 0.06)};
+        border: 2px solid {_rgba(border, 0.45)};
+        border-bottom: none;
+        border-top-left-radius: 3px;
+        border-top-right-radius: 3px;
+        color: {_rgba(text, 0.72)};
+        font-weight: 600;
+        padding: 7px 18px;
+        margin-right: 4px;
+    }}
+    QTabWidget#PropertiesTabs QTabBar::tab:hover {{
+        background: {_rgba(text, 0.13)};
+        color: {text.name()};
+    }}
+    QTabWidget#PropertiesTabs QTabBar::tab:selected {{
+        background: {BRAND_GREEN};
+        border-color: #1b4d24;
+        color: #ffffff;
+        font-weight: 800;
+    }}
+    QTabWidget#PropertiesTabs QTabBar::tab:selected:hover {{
+        background: {QColor(BRAND_GREEN).lighter(108).name()};
+    }}
+    #PropertiesPanel #Chip {{
+        background: {_rgba(text, 0.05)};
+        border: 2px solid {_rgba(border, 0.45)};
+        border-radius: 2px;
+    }}
+    #PropertiesPanel #Chip[tone="ok"] {{
+        background: {_rgba(QColor("#2e7d32"), 0.20)};
+        border-color: {_rgba(QColor("#2e7d32"), 0.60)};
+    }}
+    #PropertiesPanel #Chip[tone="warn"] {{
+        background: {_rgba(QColor("#b45309"), 0.20)};
+        border-color: {_rgba(QColor("#b45309"), 0.60)};
+    }}
+    #PropertiesPanel #Chip[tone="info"] {{
+        background: {_rgba(accent, 0.16)};
+        border-color: {_rgba(accent, 0.55)};
+    }}
+    #PropertiesPanel QLineEdit,
+    #PropertiesPanel QComboBox,
+    #PropertiesPanel QSpinBox {{
+        background: {base.name()};
+        border: 2px solid {_rgba(border, 0.62)};
+        border-radius: 2px;
+        padding: 5px 9px;
+        min-height: 19px;
+    }}
+    #PropertiesPanel QLineEdit:focus,
+    #PropertiesPanel QComboBox:focus,
+    #PropertiesPanel QSpinBox:focus {{
+        border: 2px solid {BRAND_GREEN};
+    }}
+    #PropertiesPanel QLineEdit:disabled,
+    #PropertiesPanel QComboBox:disabled,
+    #PropertiesPanel QSpinBox:disabled {{
+        color: {_rgba(text, 0.45)};
+        background: {_rgba(text, 0.04)};
+        border-color: {_rgba(border, 0.35)};
+    }}
+    QLineEdit#PropertiesSearch {{
+        background: {base.name()};
+        border: 2px solid {_rgba(border, 0.55)};
+        border-radius: 2px;
+        padding: 7px 10px;
+        font-size: 10pt;
+    }}
+    QTableWidget#PropertiesTable {{
+        background: {base.name()};
+        alternate-background-color: {_rgba(text, 0.035)};
+        border: 2px solid {_rgba(border, 0.55)};
+        border-radius: 2px;
+        gridline-color: {_rgba(border, 0.30)};
+        selection-background-color: {_rgba(accent, 0.65)};
+        selection-color: {accent_text.name()};
+    }}
+    QTableWidget#PropertiesTable QHeaderView::section {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.20)};
+        border: none;
+        border-bottom: 2px solid {_rgba(QColor(BRAND_GREEN_DARK), 0.55)};
+        padding: 6px 8px;
+        font-weight: 700;
+    }}
+    QPlainTextEdit#PropertiesTextEditor {{
+        background: {("#14161a" if dark else "#f7f8fa")};
+        color: {("#d7dbe0" if dark else "#22262b")};
+        border: 2px solid {_rgba(border, 0.55)};
+        border-radius: 2px;
+        font-family: "JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+        font-size: 9.5pt;
+        padding: 8px;
+    }}
+    #PropertiesPanel QPushButton {{
+        border-radius: 2px;
+        padding: 7px 15px;
+    }}
+    #PropertiesPanel QPushButton[accent="true"] {{
+        background: {BRAND_GREEN};
+        border: 2px solid {BRAND_GREEN_DARK};
+        border-radius: 2px;
+        color: #ffffff;
+        font-weight: 800;
+        padding: 7px 16px;
+    }}
+    #PropertiesPanel QPushButton[accent="true"]:hover {{
+        background: {QColor(BRAND_GREEN).lighter(110).name()};
+    }}
+    #PropertiesPanel QPushButton[accent="true"]:pressed {{
+        background: {BRAND_GREEN_DARK};
+    }}
+    #PropertiesPanel QPushButton[accent="true"]:disabled {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.35)};
+        border-color: {_rgba(QColor(BRAND_GREEN_DARK), 0.45)};
+        color: rgba(255, 255, 255, 0.70);
+    }}
+
     /* -------------------------------------------------- secciones con ayuda «?» */
     #SectionCard {{
         background: {_rgba(card_bg, 0.55)};

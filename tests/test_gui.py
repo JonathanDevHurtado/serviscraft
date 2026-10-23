@@ -2790,6 +2790,223 @@ class TestPestanaUnirse:
             panel.close()
 
 
+class TestPropiedades:
+    """La pestana «Propiedades»: tarjetas, mandos grandes y textos sencillos."""
+
+    def _filas(self, panel) -> dict[str, int]:
+        filas: dict[str, int] = {}
+        for fila in range(panel.table.rowCount()):
+            item = panel.table.item(fila, 0)
+            if item is not None:
+                filas[item.text()] = fila
+        return filas
+
+    def _preparar(self, store, config, spec, valores: dict[str, str] | None = None):
+        from serviscraft.ui.properties_panel import PropertiesPanel
+        from serviscraft.ui.tasks import TaskRunner
+
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        manager = ServerManager(store=store, config=config)
+        props = manager.properties(spec.id)
+        for clave, valor in (valores or {}).items():
+            props.set(clave, valor)
+        manager.save_properties(spec.id, props)
+
+        panel = PropertiesPanel(manager, TaskRunner())
+        panel.set_server(spec)
+        return panel, manager
+
+    def test_las_tarjetas_y_los_resumenes_se_entienden(
+        self, qapp: QApplication, store, config
+    ) -> None:
+        from serviscraft.ui.properties_panel import _PropertyCard
+
+        spec = make_spec()
+        panel, _manager = self._preparar(
+            store,
+            config,
+            spec,
+            {
+                "motd": "Bienvenidos al Reino",
+                "max-players": "8",
+                "difficulty": "normal",
+                "gamemode": "creative",
+                "level-name": "mundo-reino",
+            },
+        )
+        try:
+            assert panel.title.text() == f"Propiedades de «{spec.name}»"
+            titulos = {tarjeta.title_label.text() for tarjeta in panel.findChildren(_PropertyCard)}
+            assert {
+                "Tu servidor",
+                "Como se juega",
+                "Quien puede entrar",
+                "El mundo",
+            } <= titulos
+            assert panel.summary_world.text() == "Mundo: mundo-reino"
+            assert panel.summary_mode.text() == "Modo: Creativo"
+            assert panel.summary_difficulty.text() == "Dificultad: Normal"
+            assert panel.summary_players.text() == "Maximo: 8"
+            assert panel.dirty_chip.text() == "Todo guardado"
+            assert panel.restart_chip.text() == "Minecraft lo aplica al reiniciar"
+            assert "reinicia" in panel.restart_chip.toolTip().lower()
+        finally:
+            panel.close()
+
+    def test_los_desplegables_guardan_el_valor_real_de_minecraft(
+        self, qapp: QApplication, store, config
+    ) -> None:
+        spec = make_spec()
+        panel, manager = self._preparar(
+            store,
+            config,
+            spec,
+            {
+                "difficulty": "normal",
+                "gamemode": "creative",
+                "pvp": "false",
+                "max-players": "8",
+            },
+        )
+        try:
+            combo = panel._widgets["difficulty"][1]
+            assert combo.currentText() == "Normal"
+            assert combo.currentData() == "normal"
+
+            combo.setCurrentIndex(combo.findData("hard"))
+            qapp.processEvents()
+            assert combo.currentText() == "Dificil"
+            assert panel.dirty_chip.text() == "Cambios sin guardar"
+            assert panel._table_values(exclude_managed=True)["difficulty"] == "hard"
+
+            panel.save_button.click()
+            qapp.processEvents()
+            assert manager.properties(spec.id).get("difficulty") == "hard"
+            assert manager.properties(spec.id).get("gamemode") == "creative"
+            assert manager.properties(spec.id).get_bool("pvp", True) is False
+            assert manager.properties(spec.id).get_int("max-players") == 8
+            assert panel.dirty_chip.text() == "Todo guardado"
+        finally:
+            panel.close()
+
+    def test_los_interruptores_actualizan_la_tabla_y_se_guardan(
+        self, qapp: QApplication, store, config
+    ) -> None:
+        spec = make_spec()
+        panel, manager = self._preparar(store, config, spec, {"pvp": "false"})
+        try:
+            interruptor = panel._widgets["pvp"][1]
+            assert interruptor.objectName() == "PropertySwitch"
+            assert interruptor.accessibleName() == "Peleas entre amigos"
+            assert interruptor.sizeHint().width() >= 134
+
+            panel.show()
+            panel.resize(700, 700)
+            for _ in range(10):
+                qapp.processEvents()
+            assert interruptor.width() >= 134, "el interruptor no debe comprimirse"
+
+            interruptor.setChecked(True)
+            qapp.processEvents()
+            filas = self._filas(panel)
+            assert panel.table.item(filas["pvp"], 1).text() == "true"
+            assert panel.dirty_chip.text() == "Cambios sin guardar"
+
+            panel.save_button.click()
+            qapp.processEvents()
+            assert manager.properties(spec.id).get_bool("pvp", False) is True
+        finally:
+            panel.close()
+
+    def test_el_buscador_filtra_por_nombre_y_por_valor(
+        self, qapp: QApplication, store, config
+    ) -> None:
+        spec = make_spec()
+        panel, _manager = self._preparar(
+            store,
+            config,
+            spec,
+            {
+                "motd": "Bienvenidos al Reino",
+                "level-name": "mundo-reino",
+                "pvp": "true",
+                "difficulty": "normal",
+            },
+        )
+        try:
+            filas = self._filas(panel)
+            panel.search.setText("pvp")
+            qapp.processEvents()
+            assert not panel.table.isRowHidden(filas["pvp"])
+            assert panel.table.isRowHidden(filas["motd"])
+
+            panel.search.setText("reino")
+            qapp.processEvents()
+            assert not panel.table.isRowHidden(filas["motd"])
+            assert panel.table.isRowHidden(filas["difficulty"])
+
+            panel.search.clear()
+            qapp.processEvents()
+            assert all(
+                not panel.table.isRowHidden(fila) for fila in range(panel.table.rowCount())
+            )
+        finally:
+            panel.close()
+
+    def test_las_propiedades_gestionadas_estan_protegidas(
+        self, qapp: QApplication, store, config, sin_dialogos_modales
+    ) -> None:
+        spec = make_spec()
+        panel, _manager = self._preparar(store, config, spec)
+        try:
+            filas = self._filas(panel)
+            fila = filas["server-port"]
+            valor = panel.table.item(fila, 1)
+            assert not (valor.flags() & Qt.ItemFlag.ItemIsEditable)
+            assert panel.table.item(fila, 2).text() == "Protegida"
+            assert not panel.table.item(fila, 2).icon().isNull()
+
+            panel.table.setCurrentCell(fila, 1)
+            antes = panel.table.rowCount()
+            panel._remove_selected()
+            qapp.processEvents()
+            assert panel.table.rowCount() == antes
+            assert any("protegida" in titulo.lower() for titulo, _m, _d in sin_dialogos_modales["errores"])
+        finally:
+            panel.close()
+
+    def test_en_ventana_estrecha_los_campos_bajan_de_fila_sin_recortarse(
+        self, qapp: QApplication, store, config
+    ) -> None:
+        from PySide6.QtCore import QPoint
+
+        spec = make_spec()
+        panel, _manager = self._preparar(store, config, spec)
+        try:
+            panel.show()
+            panel.resize(480, 760)
+            for _ in range(15):
+                qapp.processEvents()
+
+            viewport = panel.basic_scroll.viewport()
+            assert panel.basic_scroll.horizontalScrollBar().maximum() == 0
+            assert panel.basic_content.width() <= viewport.width() + 2
+
+            for clave in ("motd", "max-players", "difficulty", "gamemode", "pvp", "enable-status"):
+                _tipo, control = panel._widgets[clave]
+                esquina = control.mapTo(viewport, QPoint(0, 0))
+                assert esquina.x() + control.width() <= viewport.width() + 2, (
+                    f"«{clave}» se sale de la ventana a 480 px: "
+                    f"{esquina.x() + control.width()} px"
+                )
+                assert control.width() >= control.minimumSizeHint().width(), (
+                    f"«{clave}» se comprime por debajo de su tamano minimo"
+                )
+        finally:
+            panel.close()
+
+
 class TestIconosDePlataforma:
     """Bloques de Minecraft: dicen si el servidor es de Java, de Bedrock o de los dos."""
 
