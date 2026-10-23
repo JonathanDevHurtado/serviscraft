@@ -20,13 +20,15 @@ from __future__ import annotations
 
 from functools import partial
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -43,13 +45,25 @@ from .common import (
     HelpButton,
     SectionCard,
     WrappingLabel,
+    copiar_al_portapapeles,
     hint_label,
     make_button,
+    section_label,
 )
 from .dialogs import confirm, show_error
 from .ddns_dialog import DdnsDialog
-from .mc_icons import PlatformBadge, bloque_bedrock, bloque_java, icono_escudo, icono_mundo
+from .mc_icons import (
+    PlatformBadge,
+    bloque_bedrock,
+    bloque_java,
+    icono_conectar,
+    icono_copiar,
+    icono_escudo,
+    icono_mundo,
+    icono_si,
+)
 from .tasks import TaskRunner
+from .theme import BRAND_GREEN, BRAND_GREEN_DARK
 
 logger = get_logger("ui.join")
 
@@ -125,6 +139,64 @@ _AYUDA_CUENTAS = (
     "propiedades del servidor y se aplica al reiniciarlo."
 )
 
+_AYUDA_UNIRSE = (
+    "Esta pestana reune todo lo que necesitas para que tus amigos entren:"
+    "<br><br>1. <b>Java</b>: la direccion que se pega en Minecraft de PC, Mac o "
+    "Linux.<br>2. <b>Bedrock</b>: movil, tablet y consola, con Geyser.<br>"
+    "3. <b>Internet</b>: lo que hay que abrir en el router para jugar desde otra "
+    "casa.<br>4. <b>Cuentas</b>: si se exige el juego comprado o se acepta "
+    "cualquiera.<br><br>El boton <b>Copiar</b> copia la direccion que se ve en ese "
+    "momento; despues se pega en Minecraft con Ctrl+V. Serviscraft no toca el "
+    "router ni el cortafuegos: solo explica lo que hay que hacer."
+)
+
+
+class _JoinHero(QFrame):
+    """Cabecera verde con una textura de bloques sutil, dibujada con Qt.
+
+    No usa imagenes externas: el degradado, el borde y los cuadraditos se pintan
+    aqui mismo, de modo que la pestana se ve igual sin conexion y con cualquier
+    tema del escritorio.
+    """
+
+    #: Lado de cada cuadradito de la textura, en pixeles.
+    _LADO_TEXTURA = 14
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("JoinHero")
+        self.setFrameShape(QFrame.Shape.NoFrame)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        marco = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        camino = QPainterPath()
+        camino.addRoundedRect(marco, 4.0, 4.0)
+
+        degradado = QLinearGradient(marco.topLeft(), marco.bottomRight())
+        degradado.setColorAt(0.0, QColor(BRAND_GREEN))
+        degradado.setColorAt(1.0, QColor(BRAND_GREEN_DARK))
+        painter.fillPath(camino, degradado)
+
+        painter.save()
+        painter.setClipPath(camino)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        lado = self._LADO_TEXTURA
+        for y in range(0, self.height(), lado):
+            for x in range(0, self.width(), lado):
+                indice = (x // lado) * 5 + (y // lado) * 3
+                if indice % 9 == 0:
+                    painter.fillRect(x, y, lado, lado, QColor(255, 255, 255, 16))
+                elif indice % 13 == 0:
+                    painter.fillRect(x, y, lado, lado, QColor(0, 0, 0, 16))
+        painter.restore()
+
+        painter.setPen(QPen(QColor("#1b4d24"), 2.0))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(camino)
+        painter.end()
+
 
 class JoinPanel(QWidget):
     """Como se conectan los jugadores y que cuentas se aceptan."""
@@ -146,8 +218,8 @@ class JoinPanel(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        self.intro = hint_label("")
-        layout.addWidget(self.intro)
+        self.hero = self._build_hero()
+        layout.addWidget(self.hero)
 
         # Resumen de un vistazo: estado del servidor y plataformas que admite.
         self.status_row = FlowRow(spacing=8)
@@ -156,6 +228,23 @@ class JoinPanel(QWidget):
         self.platform_badge = PlatformBadge()
         self.status_row.add(self.platform_badge)
         layout.addWidget(self.status_row)
+
+        # Confirmacion visible de la ultima copia. Se oculta sola a los pocos
+        # segundos y no ocupa sitio mientras no hay nada que decir.
+        self.feedback_row = FlowRow(spacing=8)
+        self.copy_feedback = Chip(
+            "Copiado al portapapeles",
+            tone="ok",
+            pixmap=icono_si(14),
+            tooltip="La direccion esta lista para pegarse en Minecraft con Ctrl+V",
+        )
+        self.copy_feedback.setVisible(False)
+        self.feedback_row.add(self.copy_feedback)
+        layout.addWidget(self.feedback_row)
+
+        self._feedback_timer = QTimer(self)
+        self._feedback_timer.setSingleShot(True)
+        self._feedback_timer.timeout.connect(self._ocultar_feedback)
 
         layout.addWidget(self._build_java_box())
         layout.addWidget(self._build_bedrock_box())
@@ -171,6 +260,38 @@ class JoinPanel(QWidget):
         self.set_server(None, running=False)
 
     # ============================================================== construccion
+    def _build_hero(self) -> QWidget:
+        """Cabecera con sabor a Minecraft: bloques, titulo y resumen del servidor."""
+        hero = _JoinHero()
+        fila = QHBoxLayout(hero)
+        fila.setContentsMargins(16, 12, 14, 12)
+        fila.setSpacing(12)
+
+        icono = QLabel()
+        icono.setObjectName("JoinHeroIcon")
+        icono.setPixmap(icono_conectar(44))
+        icono.setFixedSize(48, 48)
+        fila.addWidget(icono, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        textos = QVBoxLayout()
+        textos.setSpacing(2)
+        titulo = QLabel("Unirse")
+        titulo.setObjectName("JoinHeroTitle")
+        # Algunos estilos nativos (Breeze) ignoran el color heredado en las
+        # etiquetas de un QFrame: se fija tambien aqui.
+        titulo.setStyleSheet("color: #ffffff;")
+        textos.addWidget(titulo)
+        self.intro = WrappingLabel("")
+        self.intro.setObjectName("JoinHeroSubtitle")
+        self.intro.setStyleSheet("color: rgba(255, 255, 255, 0.88);")
+        textos.addWidget(self.intro)
+        fila.addLayout(textos, 1)
+
+        ayuda = HelpButton("Como entrar al servidor", _AYUDA_UNIRSE, hero)
+        ayuda.setObjectName("JoinHeroHelp")
+        fila.addWidget(ayuda, 0, Qt.AlignmentFlag.AlignTop)
+        return hero
+
     def _fila(self, *widgets: QWidget) -> FlowRow:
         """Fila que se envuelve sola: nada se recorta en ventanas estrechas."""
         fila = FlowRow(spacing=8)
@@ -184,6 +305,57 @@ class JoinPanel(QWidget):
         etiqueta.setObjectName("AddressText")
         etiqueta.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         return etiqueta
+
+    def _tarjeta_direccion(
+        self,
+        titulo: str,
+        *,
+        principal: bool = False,
+        chip: Chip | None = None,
+        ayuda: QWidget | None = None,
+    ) -> tuple[QFrame, ElidedLabel, QPushButton]:
+        """Tarjeta con una direccion y su boton de copiar.
+
+        La direccion ocupa el ancho que sobre y se recorta con puntos
+        suspensivos, de modo que el boton nunca se sale de la ventana. Si la
+        direccion es la principal, se pinta mas grande y con el boton verde.
+        """
+        tarjeta = QFrame()
+        tarjeta.setObjectName("PrimaryAddressCard" if principal else "AddressCard")
+        tarjeta.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        caja = QVBoxLayout(tarjeta)
+        caja.setContentsMargins(12, 9, 12, 11)
+        caja.setSpacing(6)
+
+        cabecera = FlowRow(spacing=8)
+        etiqueta = QLabel(titulo)
+        etiqueta.setObjectName("AddressCardTitle")
+        cabecera.add(etiqueta)
+        if chip is not None:
+            cabecera.add(chip)
+        if ayuda is not None:
+            cabecera.add(ayuda)
+        caja.addWidget(cabecera)
+
+        direccion = self._valor()
+        if principal:
+            direccion.setObjectName("PrimaryAddressText")
+        boton = self._copiar(direccion, principal=principal)
+        if principal:
+            # La direccion principal ocupa todo el ancho y el boton va debajo:
+            # asi se lee entera incluso con la barra lateral abierta.
+            caja.addWidget(direccion)
+            fila_boton = QHBoxLayout()
+            fila_boton.addStretch(1)
+            fila_boton.addWidget(boton)
+            caja.addLayout(fila_boton)
+        else:
+            fila = QHBoxLayout()
+            fila.setSpacing(8)
+            fila.addWidget(direccion, 1)
+            fila.addWidget(boton, 0, Qt.AlignmentFlag.AlignVCenter)
+            caja.addLayout(fila)
+        return tarjeta, direccion, boton
 
     def _paso(self, numero: int, texto: str) -> QWidget:
         """Un paso numerado: el circulo con el numero y el texto al lado."""
@@ -208,42 +380,51 @@ class JoinPanel(QWidget):
             disposicion.addWidget(self._paso(numero, texto))
         return caja
 
-    def _copiar(self, texto: str) -> QPushButton:
-        boton = make_button("Copiar", icon_names=("edit-copy",), tooltip="Copiar al portapapeles")
-        boton.clicked.connect(lambda: self._copy(texto, boton))
+    def _copiar(self, origen: ElidedLabel, *, principal: bool = False) -> QPushButton:
+        """Boton que copia el valor **actual** de la etiqueta.
+
+        El texto no se guarda al crear el boton: la direccion se rellena despues,
+        al cargar el servidor, y ademas cambia al consultar la IP publica o al
+        configurar un nombre. Si se capturase aqui, el boton copiaria el texto
+        vacio de la construccion y pareceria que no hace nada.
+        """
+        texto = "Copiar direccion" if principal else "Copiar"
+        boton = make_button(texto, tooltip="Copiar al portapapeles")
+        boton.setObjectName("CopyPrimary" if principal else "CopyButton")
+        boton.setIcon(QIcon(icono_copiar(18 if principal else 16)))
+        if principal:
+            boton.setMinimumHeight(38)
+        boton.clicked.connect(lambda: self._copy(self._texto_de(origen), boton))
         return boton
+
+    @staticmethod
+    def _texto_de(etiqueta: ElidedLabel) -> str:
+        """Texto completo (sin recortar) de una etiqueta de direccion."""
+        return etiqueta.full_text() if hasattr(etiqueta, "full_text") else etiqueta.text()
 
     def _build_java_box(self) -> SectionCard:
         box = self.address_box = SectionCard(
-            "1. Entrar desde un PC (Java)",
+            "1. Java: PC y Mac",
             pixmap=bloque_java(18),
             help_title="Minecraft Java: como se entra",
             help_text=_AYUDA_JAVA,
         )
         layout = box.body()
 
-        self.steps = self._pasos(
-            [
-                "Abre Minecraft y entra en «Multijugador».",
-                "Pulsa «Anadir servidor».",
-                "Escribe la direccion de aqui abajo (el boton la copia).",
-                "Ponle el nombre que quieras y pulsa «Hecho». Ya puedes entrar.",
-            ]
+        # Direccion principal: la que se comparte y se pega en Minecraft.
+        tarjeta, self.lan_address, self.copy_lan_button = self._tarjeta_direccion(
+            "Direccion del servidor",
+            principal=True,
+            chip=Chip("Comparte esta", tone="ok", pixmap=icono_si(12)),
         )
-        layout.addWidget(self.steps)
+        layout.addWidget(tarjeta)
 
-        # Direccion principal: es la que se copia y se pega en Minecraft.
-        self.lan_address = self._valor()
-        self.copy_lan_button = self._copiar(self.lan_address.text())
-        layout.addWidget(
-            self._fila(QLabel("Direccion del servidor"), self.lan_address, self.copy_lan_button)
+        # localhost es solo para probar en este mismo ordenador: se deja en una
+        # fila secundaria, mas discreta que la direccion de la red.
+        tarjeta_local, self.local_address, self.copy_local_button = self._tarjeta_direccion(
+            "En este mismo equipo"
         )
-
-        self.local_address = self._valor()
-        self.copy_local_button = self._copiar(self.local_address.text())
-        layout.addWidget(
-            self._fila(QLabel("En este mismo equipo"), self.local_address, self.copy_local_button)
-        )
+        layout.addWidget(tarjeta_local)
 
         self.container_label = ElidedLabel("")
         self.container_label.setObjectName("Hint")
@@ -251,11 +432,22 @@ class JoinPanel(QWidget):
 
         self.scope_note = hint_label("")
         layout.addWidget(self.scope_note)
+
+        layout.addWidget(section_label("Como entrar, paso a paso"))
+        self.steps = self._pasos(
+            [
+                "Abre Minecraft y entra en «Multijugador».",
+                "Pulsa «Anadir servidor».",
+                "Escribe la direccion de arriba (el boton la copia).",
+                "Ponle el nombre que quieras y pulsa «Hecho». Ya puedes entrar.",
+            ]
+        )
+        layout.addWidget(self.steps)
         return box
 
     def _build_outside_box(self) -> SectionCard:
         box = self.outside_box = SectionCard(
-            "3. Amigos de otras ciudades (internet)",
+            "3. Internet y router",
             pixmap=icono_mundo(18),
             help_title="Jugar con gente de fuera de casa",
             help_text=_AYUDA_INTERNET,
@@ -263,48 +455,47 @@ class JoinPanel(QWidget):
         layout = box.body()
 
         # Nombre personalizado: la forma recomendada de entrar desde fuera.
-        self.ddns_address = self._valor("Sin nombre: se entra con tu IP publica")
-        self.copy_ddns_button = self._copiar(self.ddns_address.text())
+        tarjeta_ddns, self.ddns_address, self.copy_ddns_button = self._tarjeta_direccion(
+            "Nombre para entrar",
+            ayuda=HelpButton("El nombre para entrar", _AYUDA_NOMBRE),
+        )
+        self.ddns_address.setText("Sin nombre: se entra con tu IP publica")
         self.copy_ddns_button.setEnabled(False)
+        layout.addWidget(tarjeta_ddns)
+
         self.ddns_button = make_button(
             "Poner un nombre",
             icon_names=("insert-link", "edit-rename"),
             tooltip="Un nombre propio (reinotrebol.duckdns.org) en vez de tu IP publica",
         )
         self.ddns_button.clicked.connect(self._abrir_ddns)
-        layout.addWidget(
-            self._fila(
-                QLabel("Nombre para entrar"),
-                self.ddns_address,
-                self.copy_ddns_button,
-                self.ddns_button,
-                HelpButton("El nombre para entrar", _AYUDA_NOMBRE),
-            )
-        )
+        self.ddns_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        layout.addWidget(self.ddns_button)
+
         self.ddns_chip = Chip("", tone="warn")
         self.ddns_chip.setVisible(False)
         layout.addWidget(self.ddns_chip)
         self.ddns_note = hint_label("")
         layout.addWidget(self.ddns_note)
 
-        self.public_address = self._valor("Pulsa «Consultar mi IP publica»")
+        # IP publica: se consulta a internet y se copia con el mismo formato.
+        tarjeta_publica, self.public_address, self.copy_public_button = self._tarjeta_direccion(
+            "Tu IP publica"
+        )
+        self.public_address.setText("Pulsa «Consultar mi IP publica»")
+        self.copy_public_button.setEnabled(False)
+        layout.addWidget(tarjeta_publica)
+
         self.public_button = make_button(
             "Consultar mi IP publica",
             icon_names=("network-wired", "network-workgroup"),
             tooltip="Pregunta a un servicio de internet cual es tu IP de salida",
         )
         self.public_button.clicked.connect(self._consultar_ip_publica)
-        self.copy_public_button = self._copiar(self.public_address.text())
-        self.copy_public_button.setEnabled(False)
-        layout.addWidget(
-            self._fila(
-                QLabel("Tu IP publica"),
-                self.public_address,
-                self.public_button,
-                self.copy_public_button,
-            )
-        )
+        self.public_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        layout.addWidget(self.public_button)
 
+        layout.addWidget(section_label("Abrir la puerta del router"))
         self.outside_steps = self._pasos(
             [
                 "Busca «Port forwarding» (reenvio de puertos) en tu router.",
@@ -323,7 +514,7 @@ class JoinPanel(QWidget):
 
     def _build_bedrock_box(self) -> SectionCard:
         box = self.bedrock_box = SectionCard(
-            "2. Jugadores de movil, tablet y consola (Bedrock)",
+            "2. Bedrock: movil y tablet",
             pixmap=bloque_bedrock(18),
             help_title="Minecraft Bedrock: como se entra",
             help_text=_AYUDA_BEDROCK,
@@ -331,17 +522,17 @@ class JoinPanel(QWidget):
         layout = box.body()
 
         self.bedrock_check = QCheckBox("Permitir jugadores de Bedrock (Geyser)")
+        self.bedrock_check.setIcon(QIcon(bloque_bedrock(16)))
         self.bedrock_check.setToolTip(
             "Instala los pluguins Geyser y Floodgate, y publica el puerto UDP de Bedrock."
         )
         self.bedrock_check.toggled.connect(self._on_bedrock_toggled)
         layout.addWidget(self.bedrock_check)
 
-        self.bedrock_address = self._valor()
-        self.copy_bedrock_button = self._copiar(self.bedrock_address.text())
-        layout.addWidget(
-            self._fila(QLabel("Direccion Bedrock"), self.bedrock_address, self.copy_bedrock_button)
+        tarjeta, self.bedrock_address, self.copy_bedrock_button = self._tarjeta_direccion(
+            "Direccion Bedrock"
         )
+        layout.addWidget(tarjeta)
 
         self.bedrock_note = hint_label("")
         layout.addWidget(self.bedrock_note)
@@ -356,12 +547,19 @@ class JoinPanel(QWidget):
         )
         accounts_layout = accounts.body()
         self.premium = QCheckBox("Exigir cuentas premium (online-mode)")
+        self.premium.setIcon(QIcon(icono_escudo(16)))
         self.premium.setToolTip(
             "Activado: solo entran cuentas compradas y verificadas con Mojang.\n"
             "Desactivado: tambien entran clientes sin licencia."
         )
         self.premium.toggled.connect(self._on_premium_toggled)
         accounts_layout.addWidget(self.premium)
+
+        self.premium_status = Chip(
+            "Cuentas verificadas con Mojang", tone="ok", pixmap=icono_escudo(12)
+        )
+        self.premium_status.setVisible(False)
+        accounts_layout.addWidget(self.premium_status)
 
         self.premium_note = hint_label("")
         accounts_layout.addWidget(self.premium_note)
@@ -403,9 +601,12 @@ class JoinPanel(QWidget):
         self._spec = spec
         self._running = running
         has_server = spec is not None
+        self.copy_feedback.setVisible(False)
+        self._feedback_timer.stop()
         for widget in (
-            self.intro,
+            self.hero,
             self.status_row,
+            self.feedback_row,
             self.address_box,
             self.outside_box,
             self.bedrock_box,
@@ -415,9 +616,11 @@ class JoinPanel(QWidget):
         # Los avisos que se ocultan por su cuenta (nombre sin configurar, aviso de
         # cuentas) se apagan uno a uno: un hijo de un recuadro oculto no cuenta
         # como oculto para las comprobaciones de la interfaz.
-        for widget in (self.ddns_chip,):
+        for widget in (self.ddns_chip, self.copy_feedback, self.premium_status):
             if not has_server:
                 widget.setVisible(False)
+        if not has_server:
+            self._feedback_timer.stop()
         self.empty.setVisible(not has_server)
         if has_server and cambio_estado:
             self._cargar()
@@ -443,8 +646,7 @@ class JoinPanel(QWidget):
         red = "tambien desde la red local" if spec.lan else "solo desde este equipo"
         self.container_label.setText(f"{spec.container_name} · {spec.type.label} {spec.version}")
         self.intro.setText(
-            f"Asi se conectan los jugadores a «{spec.name}» ({red}). La direccion se copia "
-            "con el boton y se pega en Minecraft."
+            f"«{spec.name}»: {red}. Copia la direccion y pegala en Minecraft."
         )
         self._cargar_estado()
         self.scope_note.setText(
@@ -599,6 +801,8 @@ class JoinPanel(QWidget):
         dialogo.finished.connect(self._ddns_cerrado)
         self._ddns_dialog = dialogo
         dialogo.show()
+        dialogo.raise_()
+        dialogo.activateWindow()
 
     def _ddns_cerrado(self, *_args: object) -> None:
         """Al cerrar la ventana se refresca la pestana con lo que se haya guardado."""
@@ -622,10 +826,19 @@ class JoinPanel(QWidget):
         # recrear el contenedor): se explica en la nota.
         self.bedrock_check.setEnabled(disponible and not self._running)
         if not disponible:
+            self.bedrock_check.setToolTip(motivo)
             self.bedrock_address.setText("No disponible")
             self.copy_bedrock_button.setEnabled(False)
             self.bedrock_note.setText(motivo)
             return
+        if self._running:
+            self.bedrock_check.setToolTip(
+                "El servidor esta en marcha: detenlo para poder cambiar el modo Bedrock."
+            )
+        else:
+            self.bedrock_check.setToolTip(
+                "Instala los pluguins Geyser y Floodgate, y publica el puerto UDP de Bedrock."
+            )
         host = self.manager.host_lan_ip()
         if spec.bedrock_enabled:
             self.bedrock_address.setText(f"{host}:{spec.bedrock_port}")
@@ -666,12 +879,16 @@ class JoinPanel(QWidget):
 
     def _actualizar_notas(self, premium: bool) -> None:
         if premium:
+            self.premium_status.set_text("Cuentas verificadas con Mojang")
+            self.premium_status.set_tone("ok")
+            self.premium_status.setVisible(True)
             self.premium_note.setText(
                 "Modo premium: la consola de Mojang comprueba que la cuenta existe. "
                 "Es lo recomendado y lo que evita suplantaciones."
             )
             self._ocultar_aviso()
             return
+        self.premium_status.setVisible(False)
         self.premium_note.setText(
             "Modo sin licencia: se acepta cualquier cliente, tambien los que no han "
             "comprado el juego."
@@ -693,11 +910,39 @@ class JoinPanel(QWidget):
         self.apply_button.setEnabled(True)
 
     def _copy(self, texto: str, boton: QPushButton | None = None) -> None:
-        """Copia al portapapeles y confirma en el propio boton que se copio."""
+        """Copia al portapapeles y confirma que de verdad se copio.
+
+        La copia pasa por :func:`copiar_al_portapapeles`: en Wayland usa
+        ``wl-copy`` como respaldo cuando Qt no publica la seleccion, de modo que
+        el texto llega tambien a Minecraft y a cualquier otro programa.
+        """
         if not texto or texto.startswith(("Pulsa «", "Desactivad", "Consultando", "No disponible")):
             return
-        QApplication.clipboard().setText(texto)
-        self._confirmar_copiado(boton)
+        if copiar_al_portapapeles(texto):
+            logger.info("Direccion copiada al portapapeles: %s", texto)
+            self._mostrar_feedback(texto)
+            self._confirmar_copiado(boton)
+            return
+        logger.warning("El portapapeles no acepto la direccion: %s", texto)
+        show_error(
+            self,
+            "No se pudo copiar la direccion",
+            "El portapapeles del sistema no acepto el texto. La direccion es:\n\n"
+            f"{texto}\n\n"
+            "Selecciona la direccion con el raton y pulsa Ctrl+C para copiarla.",
+        )
+
+    def _mostrar_feedback(self, texto: str) -> None:
+        """Ensenia una confirmacion visible ademas del texto del boton."""
+        self.copy_feedback.set_text("Copiado al portapapeles")
+        self.copy_feedback.setToolTip(f"Copiado: {texto}")
+        self.copy_feedback.setVisible(True)
+        self.feedback_row.updateGeometry()
+        self._feedback_timer.start(2600)
+
+    def _ocultar_feedback(self) -> None:
+        self.copy_feedback.setVisible(False)
+        self.feedback_row.updateGeometry()
 
     def _confirmar_copiado(self, boton: QPushButton | None) -> None:
         if boton is None or not boton.isEnabled():
@@ -718,6 +963,7 @@ class JoinPanel(QWidget):
     # ============================================================= IP publica
     def _consultar_ip_publica(self) -> None:
         self.public_button.setEnabled(False)
+        self.copy_public_button.setEnabled(False)
         self.public_address.setText("Consultando...")
 
         def work(*, context) -> str:

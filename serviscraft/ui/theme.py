@@ -139,6 +139,187 @@ def build_stylesheet(palette: QPalette) -> str:
         font-family: "JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
     }}
 
+    /* ----------------------------------------------- jugadores (estilo bloque) */
+    QFrame#PlayersHero {{
+        background-color: {BRAND_GREEN};
+        border: 2px solid #1b4d24;
+        border-radius: 2px;
+    }}
+    QLabel#PlayersHeroTitle {{
+        color: #ffffff;
+        font-size: 17pt;
+        font-weight: 800;
+        letter-spacing: 1px;
+    }}
+    QLabel#PlayersHeroSubtitle {{
+        color: rgba(255, 255, 255, 0.84);
+        font-size: 9.5pt;
+    }}
+    QLabel#PlayersHeroIcon {{
+        background: transparent;
+    }}
+    QFrame#WhitelistBanner {{
+        background-color: {_rgba(QColor(BRAND_GREEN), 0.12)};
+        border: 2px solid {_rgba(QColor(BRAND_GREEN_DARK), 0.7)};
+        border-radius: 2px;
+    }}
+    QLabel#WhitelistTitle {{
+        font-weight: 700;
+        font-size: 11.5pt;
+    }}
+    QLabel#WhitelistState {{
+        color: {_rgba(text, 0.7)};
+        font-size: 9pt;
+    }}
+    QPushButton#WhitelistToggle {{
+        background: {BRAND_GREEN};
+        border: 2px solid {BRAND_GREEN_DARK};
+        border-radius: 2px;
+        color: #ffffff;
+        font-weight: 800;
+        padding: 8px 16px;
+    }}
+    QPushButton#WhitelistToggle:hover {{
+        background: {QColor(BRAND_GREEN).lighter(112).name()};
+    }}
+    QPushButton#WhitelistToggle:pressed {{
+        background: {BRAND_GREEN_DARK};
+    }}
+    QPushButton#WhitelistToggle:checked {{
+        background: {BRAND_GREEN_DARK};
+        border-color: #1b4d24;
+        color: #ffffff;
+    }}
+    QPushButton#WhitelistToggle:checked:hover {{
+        background: {QColor(BRAND_GREEN_DARK).lighter(112).name()};
+    }}
+    QPushButton#InviteButton {{
+        background: {BRAND_GREEN};
+        border: 2px solid {BRAND_GREEN_DARK};
+        border-radius: 2px;
+        color: #ffffff;
+        font-weight: 700;
+        padding: 7px 16px;
+    }}
+    QPushButton#InviteButton:hover {{
+        background: {QColor(BRAND_GREEN).lighter(112).name()};
+    }}
+    QPushButton#InviteButton:pressed {{
+        background: {BRAND_GREEN_DARK};
+    }}
+    QPushButton#InviteButton:disabled {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.35)};
+        border-color: {_rgba(QColor(BRAND_GREEN_DARK), 0.45)};
+        color: rgba(255, 255, 255, 0.7);
+    }}
+    #PlayersPanel QPushButton {{
+        border-radius: 2px;
+        padding: 7px 14px;
+    }}
+    #PlayersPanel QPushButton[playerAction="true"] {{
+        font-weight: 600;
+    }}
+    #PlayersPanel QTableWidget {{
+        border: 2px solid {_rgba(border, 0.55)};
+        border-radius: 2px;
+    }}
+
+    /* ------------------------------------------- unirse: cabecera y direcciones */
+    QToolButton#JoinHeroHelp {{
+        background: rgba(255, 255, 255, 0.16);
+        border: 1px solid rgba(255, 255, 255, 0.60);
+        color: #ffffff;
+        font-weight: 700;
+    }}
+    QToolButton#JoinHeroHelp:hover {{
+        background: rgba(255, 255, 255, 0.30);
+        border-color: rgba(255, 255, 255, 0.90);
+    }}
+    QFrame#PrimaryAddressCard {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.10)};
+        border: 2px solid {_rgba(QColor(BRAND_GREEN_DARK), 0.55)};
+        border-radius: 4px;
+    }}
+    QFrame#AddressCard {{
+        background: {_rgba(text, 0.035)};
+        border: 1px solid {_rgba(border, 0.45)};
+        border-radius: 4px;
+    }}
+    QLabel#AddressCardTitle {{
+        font-weight: 700;
+        color: {_rgba(text, 0.82)};
+    }}
+    QLabel#PrimaryAddressText {{
+        font-family: "JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+        font-size: 13pt;
+        font-weight: 700;
+        background: {_rgba(base, 0.55)};
+        border: 1px solid {_rgba(QColor(BRAND_GREEN_DARK), 0.45)};
+        border-radius: 2px;
+        padding: 8px 12px;
+    }}
+    QPushButton#CopyPrimary {{
+        background: {BRAND_GREEN};
+        border: 2px solid {BRAND_GREEN_DARK};
+        border-radius: 2px;
+        color: #ffffff;
+        font-weight: 800;
+        padding: 9px 18px;
+    }}
+    QPushButton#CopyPrimary:hover {{
+        background: {QColor(BRAND_GREEN).lighter(112).name()};
+    }}
+    QPushButton#CopyPrimary:pressed {{
+        background: {BRAND_GREEN_DARK};
+    }}
+    QPushButton#CopyPrimary:disabled {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.35)};
+        border-color: {_rgba(QColor(BRAND_GREEN_DARK), 0.40)};
+        color: rgba(255, 255, 255, 0.70);
+    }}
+    QPushButton#CopyButton {{
+        border-radius: 2px;
+        padding: 6px 12px;
+    }}
+    QPushButton#TokenToggle {{
+        border-radius: 2px;
+        padding: 5px 14px;
+    }}
+    QLineEdit#DdnsPreview {{
+        font-family: "JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+        font-size: 11pt;
+        font-weight: 700;
+        color: {text.name()};
+        placeholder-text-color: {_rgba(text, 0.42)};
+        background: {_rgba(QColor(BRAND_GREEN), 0.10)};
+        border: 1px solid {_rgba(QColor(BRAND_GREEN_DARK), 0.55)};
+        border-radius: 4px;
+        padding: 7px 10px;
+    }}
+    QLabel#FieldError {{
+        color: #b3261e;
+        font-size: 9pt;
+    }}
+    QPushButton#ApplyAccounts {{
+        background: {BRAND_GREEN};
+        border: 2px solid {BRAND_GREEN_DARK};
+        border-radius: 2px;
+        color: #ffffff;
+        font-weight: 800;
+        padding: 8px 16px;
+    }}
+    QPushButton#ApplyAccounts:hover {{
+        background: {QColor(BRAND_GREEN).lighter(112).name()};
+    }}
+    QPushButton#ApplyAccounts:pressed {{
+        background: {BRAND_GREEN_DARK};
+    }}
+    QPushButton#ApplyAccounts:disabled {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.35)};
+        border-color: {_rgba(QColor(BRAND_GREEN_DARK), 0.45)};
+        color: rgba(255, 255, 255, 0.70);
+    }}
+
     /* -------------------------------------------------- secciones con ayuda «?» */
     #SectionCard {{
         background: {_rgba(card_bg, 0.55)};

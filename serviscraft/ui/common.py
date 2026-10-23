@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import html
+import os
+import shutil
+import subprocess
 from collections.abc import Iterable
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPaintEvent, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -53,6 +57,74 @@ def plural(cantidad: int, singular: str, plural_: str) -> str:
     Evita el feo «1 servidor(es)» de los mensajes que lee el usuario.
     """
     return f"{cantidad} {singular if cantidad == 1 else plural_}"
+
+
+def copiar_al_portapapeles(texto: str) -> bool:
+    """Copia texto y confirma que el portapapeles lo acepto.
+
+    En Wayland, Qt puede dejar el texto solo en su portapapeles interno si la
+    ventana no tiene foco o si el compositor no publica la seleccion. ``wl-copy``
+    habla directamente con el compositor, asi que se usa como respaldo cuando
+    esta disponible. En las pruebas ``offscreen`` nunca se llama a programas
+    externos: se comprueba solo el portapapeles de Qt.
+    """
+    if not texto:
+        return False
+    app = QApplication.instance()
+    if app is None:
+        return False
+
+    portapapeles = app.clipboard()
+    portapapeles.setText(texto)
+
+    plataforma = app.platformName().lower()
+    if plataforma == "offscreen":
+        return portapapeles.text() == texto
+
+    # En Wayland el respaldo nativo es mas fiable y, ademas, mantiene el texto
+    # disponible aunque Serviscraft se cierre antes de pegar.
+    if plataforma == "wayland" and os.environ.get("WAYLAND_DISPLAY"):
+        wl_copy = shutil.which("wl-copy")
+        if wl_copy:
+            try:
+                resultado = subprocess.run(
+                    [wl_copy],
+                    input=texto,
+                    text=True,
+                    timeout=2,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except (OSError, subprocess.SubprocessError):
+                resultado = None
+            if resultado is not None and resultado.returncode == 0:
+                return True
+
+    if portapapeles.text() == texto:
+        return True
+
+    # Ultimo recurso en X11: xsel/xclip suelen estar instalados en KDE/XFCE.
+    if os.environ.get("DISPLAY"):
+        xsel = shutil.which("xsel")
+        comando = [xsel, "--clipboard", "--input"] if xsel else None
+        if comando is None:
+            xclip = shutil.which("xclip")
+            comando = [xclip, "-selection", "clipboard"] if xclip else None
+        if comando:
+            try:
+                resultado = subprocess.run(
+                    comando,
+                    input=texto,
+                    text=True,
+                    timeout=2,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return False
+            return resultado.returncode == 0
+
+    return False
 
 
 def icon_pixmap(*names: str, size: int = 16) -> QPixmap | None:
@@ -271,14 +343,28 @@ class FlowLayout(QLayout):
         super().setGeometry(rect)
         self._layout(rect, only_test=False)
 
+    def _visibles(self) -> list[QLayoutItem]:
+        """Elementos que se deben colocar: los ocultos no ocupan sitio.
+
+        Las acciones de jugador aparecen y desaparecen segun quien este elegido
+        (dar o quitar permisos, invitar o bloquear...). Si la fila reservase el
+        hueco de los botones ocultos quedarian agujeros en medio de la botonera.
+        """
+        return [
+            item
+            for item in self._items
+            if item.widget() is None or not item.widget().isHidden()
+        ]
+
     def sizeHint(self) -> QSize:  # noqa: N802 - API de Qt
         """Tamaño con todo en una sola fila (el aspecto de siempre)."""
         margins = self.contentsMargins()
-        if not self._items:
+        items = self._visibles()
+        if not items:
             return QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
-        width = sum(item.sizeHint().width() for item in self._items)
-        width += self._spacing() * (len(self._items) - 1)
-        height = max(item.sizeHint().height() for item in self._items)
+        width = sum(item.sizeHint().width() for item in items)
+        width += self._spacing() * (len(items) - 1)
+        height = max(item.sizeHint().height() for item in items)
         return QSize(
             width + margins.left() + margins.right(),
             height + margins.top() + margins.bottom(),
@@ -287,10 +373,11 @@ class FlowLayout(QLayout):
     def minimumSize(self) -> QSize:  # noqa: N802 - API de Qt
         """Lo más estrecho posible: el elemento más ancho (los demás envuelven)."""
         margins = self.contentsMargins()
-        if not self._items:
+        items = self._visibles()
+        if not items:
             return QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
-        width = max(item.minimumSize().width() for item in self._items)
-        height = max(item.sizeHint().height() for item in self._items)
+        width = max(item.minimumSize().width() for item in items)
+        height = max(item.sizeHint().height() for item in items)
         return QSize(
             width + margins.left() + margins.right(),
             height + margins.top() + margins.bottom(),
@@ -309,7 +396,7 @@ class FlowLayout(QLayout):
         # que encajase justo de ancho se partia por un pixel de mas.
         right = rect.x() + rect.width() - margins.right()
         line_height = 0
-        for item in self._items:
+        for item in self._visibles():
             size = item.sizeHint()
             # Se cambia de fila si el elemento no cabe y ya hay algo en la actual.
             if x + size.width() > right and line_height > 0:

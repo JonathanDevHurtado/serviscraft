@@ -36,7 +36,13 @@ from ..core.models import ServerSpec
 from ..core.players import PlayersSnapshot, validate_player_name
 from .common import SectionCard, hint_label, make_button
 from .dialogs import confirm, show_error
-from .mc_icons import icono_jugador
+from .mc_icons import (
+    icono_candado,
+    icono_corona,
+    icono_jugador,
+    icono_lista,
+    icono_pase,
+)
 from .tasks import TaskRunner
 
 logger = get_logger("ui.players_manager")
@@ -44,27 +50,34 @@ logger = get_logger("ui.players_manager")
 #: Lo que se puede hacer en cada lista: clave de accion para anadir y quitar.
 _LISTAS: dict[str, tuple[str, str, str]] = {
     # clave: (titulo, accion de anadir, accion de quitar)
-    "whitelist": ("Lista blanca", "whitelist_add", "whitelist_remove"),
+    "whitelist": ("Invitados", "whitelist_add", "whitelist_remove"),
     "banned": ("Bloqueados", "ban", "pardon"),
-    "ops": ("Operadores", "op", "deop"),
+    "ops": ("Administradores", "op", "deop"),
 }
 
 #: Nombre del boton de quitar de cada lista.
 _QUITAR: dict[str, str] = {
-    "whitelist": "Quitar de la lista",
-    "banned": "Perdonar",
-    "ops": "Quitar OP",
+    "whitelist": "Quitar invitacion",
+    "banned": "Dejar entrar",
+    "ops": "Quitar administrador",
+}
+
+#: Iconos propios de cada lista y de sus botones de anadir/quitar.
+_ICONOS: dict[str, tuple[object, object]] = {
+    "whitelist": (icono_pase, icono_lista),
+    "banned": (icono_candado, icono_pase),
+    "ops": (icono_corona, icono_corona),
 }
 
 #: Ayuda que explica de que va todo esto.
 _AYUDA = (
-    "<b>Lista blanca:</b> los invitados de confianza. Si la casilla «Exigir "
-    "lista blanca» esta marcada, solo entra quien este en la lista; el resto ve "
-    "el mensaje de que no esta invitado."
-    "<br><br><b>Bloqueados:</b> la lista negra. Un jugador bloqueado no puede "
-    "entrar aunque este en la lista blanca, hasta que se le perdone."
-    "<br><br><b>Operadores:</b> administradores. Pueden usar comandos como "
-    "<i>/gamemode</i>, <i>/tp</i> o <i>/give</i>."
+    "<b>Invitados (lista blanca):</b> los amigos de confianza. Si la opcion "
+    "«Solo pueden entrar los invitados» esta marcada, solo entra quien este en "
+    "esta lista; los demas veran que no estan invitados."
+    "<br><br><b>Bloqueados:</b> jugadores a los que se les ha cerrado la puerta. "
+    "No pueden entrar aunque esten invitados, hasta que les quites el bloqueo."
+    "<br><br><b>Administradores:</b> jugadores con poderes especiales dentro del "
+    "juego. Pueden cambiar el modo de juego, teletransportarse o dar objetos."
     "<br><br>Con el servidor <b>encendido</b> los cambios se aplican al momento. "
     "Con el servidor <b>detenido</b> se guardan en sus listas y valen desde el "
     "proximo arranque."
@@ -114,12 +127,15 @@ class PlayersManagerDialog(QDialog):
         self.resumen.setWordWrap(True)
         cuerpo.addWidget(self.resumen)
 
-        self.whitelist_check = QCheckBox("Exigir lista blanca (solo entran los invitados)")
+        self.whitelist_check = QCheckBox("Solo pueden entrar los invitados (lista blanca)")
         self.whitelist_check.setToolTip(
-            "Escribe white-list=true/false en server.properties y lo aplica al momento si el servidor esta encendido"
+            "Con esta opcion activada, solo entra quien este en la lista de invitados. "
+            "El cambio se guarda en el servidor y se aplica al momento si esta encendido."
         )
         self.whitelist_check.toggled.connect(self._on_toggle_whitelist)
         cuerpo.addWidget(self.whitelist_check)
+        self.whitelist_hint = hint_label("")
+        cuerpo.addWidget(self.whitelist_hint)
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
@@ -129,7 +145,8 @@ class PlayersManagerDialog(QDialog):
         self._remove_buttons: dict[str, QWidget] = {}
         self._tab_index: dict[str, int] = {}
         for key, (titulo, _add, _remove) in _LISTAS.items():
-            self._tab_index[key] = self.tabs.addTab(self._build_tab(key), titulo)
+            indice = self.tabs.addTab(self._build_tab(key), QIcon(_ICONOS[key][0](16)), titulo)
+            self._tab_index[key] = indice
         cuerpo.addWidget(self.tabs, 1)
 
         self.status = hint_label("")
@@ -185,11 +202,15 @@ class PlayersManagerDialog(QDialog):
         self._inputs[key] = campo
 
         anadir = make_button(
-            "Anadir" if key != "banned" else "Bloquear",
+            {
+                "whitelist": "Invitar",
+                "banned": "Bloquear",
+                "ops": "Hacer administrador",
+            }.get(key, "Anadir"),
             accent=True,
-            icon_names=("list-add",),
             tooltip=f"Anadir un jugador a «{titulo}»",
         )
+        anadir.setIcon(QIcon(_ICONOS[key][0](16)))
         anadir.clicked.connect(lambda _checked=False, k=key: self._anadir(k))
         self._add_buttons[key] = anadir
         fila.addWidget(anadir)
@@ -197,9 +218,9 @@ class PlayersManagerDialog(QDialog):
         quitar = make_button(
             _QUITAR[key],
             danger=key == "banned",
-            icon_names=("list-remove",),
             tooltip=f"Quitar al jugador elegido de «{titulo}»",
         )
+        quitar.setIcon(QIcon(_ICONOS[key][1](16)))
         quitar.clicked.connect(lambda _checked=False, k=key: self._quitar(k))
         self._remove_buttons[key] = quitar
         fila.addWidget(quitar)
@@ -275,6 +296,12 @@ class PlayersManagerDialog(QDialog):
                 f"Servidor detenido. Lista blanca {estado}. Los cambios se guardan para el "
                 "proximo arranque."
             )
+        self.whitelist_hint.setText(
+            "Ahora solo entran los invitados. Es la opcion recomendada para jugar con amigos."
+            if snapshot.whitelist_enabled
+            else "Ahora puede entrar cualquiera que tenga la direccion. Activa esta opcion para "
+            "jugar solo con tus invitados."
+        )
         self.status.setText(snapshot.note or "Listas al dia.")
 
     # ================================================================== acciones
@@ -392,9 +419,14 @@ class PlayersManagerDialog(QDialog):
             if self._cerrado:
                 return
             self.status.setText(
-                "Lista blanca activada: solo entran los invitados."
+                "Listo: solo entran los invitados."
                 if enabled
-                else "Lista blanca desactivada: puede entrar cualquiera."
+                else "Listo: ahora puede entrar cualquiera."
+            )
+            self.whitelist_hint.setText(
+                "Ahora solo entran los invitados. Es la opcion recomendada para jugar con amigos."
+                if enabled
+                else "Ahora puede entrar cualquiera que tenga la direccion."
             )
             if self._on_changed is not None:
                 try:

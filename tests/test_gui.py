@@ -8,6 +8,7 @@ No lanzan ningun contenedor.
 from __future__ import annotations
 
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -60,6 +61,7 @@ def sin_dialogos_modales(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         create_dialog,
         details_panel,
         dialogs,
+        ddns_dialog,
         files_panel,
         import_dialog,
         main_window,
@@ -2663,6 +2665,69 @@ class TestPestanaUnirse:
         finally:
             panel.close()
 
+    def test_los_botones_copian_la_direccion_que_se_ve(
+        self, qapp: QApplication, store, config
+    ) -> None:
+        """El boton copia el valor cargado, no el texto vacio de la construccion."""
+        spec = make_spec(lan=True)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+
+        panel = self._panel(store, config, spec)
+        try:
+            panel.copy_local_button.click()
+            qapp.processEvents()
+            assert QApplication.clipboard().text() == f"localhost:{spec.port}"
+
+            panel.copy_lan_button.click()
+            qapp.processEvents()
+            assert QApplication.clipboard().text() == panel.lan_address.full_text()
+            assert panel.lan_address.full_text().endswith(f":{spec.port}")
+        finally:
+            panel.close()
+
+    def test_el_ayudante_de_copia_no_llama_a_programas_externos_offscreen(
+        self, qapp: QApplication, monkeypatch
+    ) -> None:
+        """En las pruebas solo se toca el portapapeles de Qt, nunca el real."""
+        from serviscraft.ui import common
+
+        llamadas: list[tuple] = []
+        monkeypatch.setattr(common.subprocess, "run", lambda *args, **kwargs: llamadas.append(args))
+        try:
+            assert common.copiar_al_portapapeles("serviscraft-copia-123")
+            assert QApplication.clipboard().text() == "serviscraft-copia-123"
+            assert not llamadas
+            assert not common.copiar_al_portapapeles("")
+        finally:
+            QApplication.clipboard().clear()
+
+    def test_si_el_portapapeles_falla_avisa_y_muestra_la_direccion(
+        self, qapp: QApplication, store, config, monkeypatch
+    ) -> None:
+        """Un fallo de copia no se queda en silencio: se puede copiar a mano."""
+        from serviscraft.ui import join_panel as modulo
+
+        spec = make_spec(lan=True)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        panel = self._panel(store, config, spec)
+        errores: list[tuple[str, str]] = []
+        monkeypatch.setattr(modulo, "copiar_al_portapapeles", lambda texto: False)
+        monkeypatch.setattr(
+            modulo,
+            "show_error",
+            lambda parent, titulo, mensaje, details="": errores.append((titulo, mensaje)),
+        )
+        try:
+            panel.copy_lan_button.click()
+            qapp.processEvents()
+            assert errores, "no se aviso del fallo"
+            assert panel.lan_address.full_text() in errores[0][1]
+            assert "Ctrl+C" in errores[0][1]
+        finally:
+            panel.close()
+
     def test_quitar_el_modo_premium_avisa_y_guarda_al_reiniciar(
         self, qapp, store, config, monkeypatch
     ) -> None:
@@ -2738,6 +2803,8 @@ class TestIconosDePlataforma:
                 mc_icons.icono_mod(tam),
                 mc_icons.icono_plugin(tam),
                 mc_icons.icono_pack(tam),
+                mc_icons.icono_copiar(tam),
+                mc_icons.icono_conectar(tam),
             ):
                 assert not pixmap.isNull()
                 assert pixmap.width() == tam and pixmap.height() == tam
@@ -3129,3 +3196,173 @@ class TestAspectoDelServidor:
         for _ in range(10):
             qapp.processEvents()
         assert not window.header_icon.pixmap().isNull()
+
+
+class TestDialogoNombre:
+    """El dialogo de DuckDNS: cabe, valida y consulta sin congelar la ventana."""
+
+    def _dialogo(
+        self,
+        qapp: QApplication,
+        store: ServerStore,
+        config: AppConfig,
+        *,
+        public_ip: str = "",
+        **overrides,
+    ):
+        from serviscraft.ui.ddns_dialog import DdnsDialog
+        from serviscraft.ui.tasks import TaskRunner
+
+        spec = make_spec(**overrides)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        runner = TaskRunner()
+        dialogo = DdnsDialog(
+            ServerManager(store=store, config=config),
+            runner,
+            spec,
+            public_ip=public_ip,
+        )
+        return dialogo, runner, spec
+
+    @staticmethod
+    def _cerrar(dialogo, runner, qapp: QApplication) -> None:
+        dialogo.close()
+        runner.wait_for_done(4000)
+        qapp.processEvents()
+
+    @staticmethod
+    def _comprobar_encaje(dialogo, qapp: QApplication) -> None:
+        from PySide6.QtWidgets import QPushButton
+
+        for _ in range(10):
+            qapp.processEvents()
+        assert dialogo.width() >= 560
+        for boton in dialogo.findChildren(QPushButton):
+            if not boton.isVisible():
+                continue
+            esquina = boton.mapTo(dialogo, boton.rect().bottomRight())
+            assert esquina.x() <= dialogo.width(), f"«{boton.text()}» se sale por la derecha"
+            assert esquina.y() <= dialogo.height(), f"«{boton.text()}» se sale por abajo"
+
+    def test_los_botones_y_la_direccion_caben_en_la_ventana(
+        self, qapp: QApplication, store, config
+    ) -> None:
+        dialogo, runner, _spec = self._dialogo(qapp, store, config)
+        try:
+            dialogo.show()
+            self._comprobar_encaje(dialogo, qapp)
+            # La vista previa tiene alto de sobra: antes se pintaba a 18 px y el
+            # texto aparecia cortado por la mitad.
+            assert dialogo.preview.height() >= dialogo.preview.fontMetrics().height() + 10
+
+            # En el ancho minimo los botones se envuelven, pero siguen enteros.
+            dialogo.resize(560, dialogo.minimumSizeHint().height())
+            self._comprobar_encaje(dialogo, qapp)
+        finally:
+            self._cerrar(dialogo, runner, qapp)
+
+    def test_el_formulario_avisa_de_un_nombre_o_token_invalidos(
+        self, qapp: QApplication, store, config
+    ) -> None:
+        dialogo, runner, spec = self._dialogo(qapp, store, config)
+        try:
+            dialogo.show()
+            qapp.processEvents()
+
+            dialogo.subdomain_input.setText("Reino Trebol")
+            qapp.processEvents()
+            assert dialogo.name_error.isVisible()
+            assert "letras" in dialogo.name_error.text()
+            assert not dialogo.save_button.isEnabled()
+            assert dialogo.preview.text() == ""
+
+            dialogo.subdomain_input.setText("ReinoTrebol")
+            dialogo.token_input.setText("1234")
+            qapp.processEvents()
+            assert dialogo.token_error.isVisible()
+            assert not dialogo.save_button.isEnabled()
+
+            dialogo.token_input.setText("12345678-abcd-1234-abcd-123456789012")
+            qapp.processEvents()
+            assert not dialogo.name_error.isVisible()
+            assert not dialogo.token_error.isVisible()
+            assert dialogo.save_button.isEnabled()
+            assert dialogo.preview.text() == f"reinotrebol.duckdns.org:{spec.port}"
+        finally:
+            self._cerrar(dialogo, runner, qapp)
+
+    def test_guardar_aplica_el_nombre_y_avisa_a_duckdns(
+        self, qapp: QApplication, store, config, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from serviscraft.core import ddns
+
+        monkeypatch.setattr(ddns, "update", lambda *a, **k: "OK")
+        monkeypatch.setattr(ddns, "resolve", lambda *a, **k: {"83.54.12.7"})
+        dialogo, runner, spec = self._dialogo(
+            qapp, store, config, public_ip="83.54.12.7"
+        )
+        try:
+            dialogo.show()
+            dialogo.subdomain_input.setText("reinotrebol")
+            dialogo.token_input.setText("12345678-abcd-1234-abcd-123456789012")
+            qapp.processEvents()
+            dialogo.save_button.click()
+            for _ in range(200):
+                qapp.processEvents()
+                if dialogo.state_chip.text() == "Guardado":
+                    break
+                runner.wait_for_done(20)
+            assert dialogo.state_chip.text() == "Guardado"
+            guardado = store.load(spec.id)
+            assert guardado.ddns_subdomain == "reinotrebol"
+            assert guardado.ddns_configured
+        finally:
+            self._cerrar(dialogo, runner, qapp)
+
+    def test_la_comprobacion_de_dns_no_bloquea_la_ventana(
+        self, qapp: QApplication, store, config, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from serviscraft.core.ddns import DdnsStatus
+        from serviscraft.ui import ddns_dialog as modulo
+
+        empezo = threading.Event()
+        liberar = threading.Event()
+
+        def check_lento(subdominio, *, public_ip="", puerto=None):
+            empezo.set()
+            liberar.wait(4)
+            return DdnsStatus(
+                subdomain=subdominio,
+                hostname=f"{subdominio}.duckdns.org",
+                state="ok",
+                detail="Listo: el nombre apunta a este equipo.",
+                public_ip=public_ip,
+            )
+
+        monkeypatch.setattr(modulo.ddns, "check", check_lento)
+        dialogo, runner, _spec = self._dialogo(
+            qapp,
+            store,
+            config,
+            public_ip="83.54.12.7",
+            ddns_subdomain="reinotrebol",
+            ddns_token="token-de-prueba",
+        )
+        try:
+            # La consulta corre en segundo plano: el constructor ya devolvio y la
+            # ventana se puede mostrar mientras el DNS sigue esperando.
+            assert empezo.wait(2), "la comprobacion no llego a empezar"
+            dialogo.show()
+            assert dialogo.state_chip.text() == "Comprobando..."
+
+            liberar.set()
+            for _ in range(200):
+                qapp.processEvents()
+                if dialogo.state_chip.text() == "Funcionando":
+                    break
+                runner.wait_for_done(20)
+            assert dialogo.state_chip.text() == "Funcionando"
+        finally:
+            liberar.set()
+            self._cerrar(dialogo, runner, qapp)

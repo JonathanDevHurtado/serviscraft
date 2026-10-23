@@ -535,21 +535,243 @@ class PlatformBadge(QWidget):
             self.setToolTip("Servidor de Java: entran PC, Mac y Linux.")
 
 
+@lru_cache(maxsize=32)
+def icono_corona(size: int = SIZE) -> QPixmap:
+    """Corona dorada: jugador con permisos de administrador."""
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    s = float(size)
+    grosor = max(1.0, size / 15.0)
+
+    corona = QPolygonF(
+        [
+            QPointF(0.12 * s, 0.30 * s),
+            QPointF(0.32 * s, 0.48 * s),
+            QPointF(0.50 * s, 0.20 * s),
+            QPointF(0.68 * s, 0.48 * s),
+            QPointF(0.88 * s, 0.30 * s),
+            QPointF(0.80 * s, 0.76 * s),
+            QPointF(0.20 * s, 0.76 * s),
+        ]
+    )
+    _pincel(painter, "#f2c14e", grosor=grosor)
+    painter.setBrush(QColor("#f2c14e"))
+    painter.drawPolygon(corona)
+    _lapiz(painter, "#8a5c0d", grosor=grosor)
+    painter.drawPolygon(corona)
+
+    _relleno(painter, "#fff2b0")
+    painter.drawEllipse(QRectF(0.44 * s, 0.34 * s, 0.12 * s, 0.12 * s))
+    _relleno(painter, "#d94b4b")
+    painter.drawEllipse(QRectF(0.22 * s, 0.40 * s, 0.08 * s, 0.08 * s))
+    painter.drawEllipse(QRectF(0.70 * s, 0.40 * s, 0.08 * s, 0.08 * s))
+    painter.end()
+    return pixmap
+
+
+@lru_cache(maxsize=32)
+def icono_pase(size: int = SIZE) -> QPixmap:
+    """Pase verde con un visto: invitacion para entrar al servidor."""
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    s = float(size)
+    grosor = max(1.0, size / 16.0)
+
+    _lapiz(painter, "#1f6b3a", grosor=grosor)
+    painter.setBrush(QColor("#4fbf62"))
+    painter.drawRoundedRect(QRectF(0.10 * s, 0.24 * s, 0.80 * s, 0.52 * s), 0.10 * s, 0.10 * s)
+
+    _relleno(painter, "#2e8b45")
+    painter.drawRect(QRectF(0.30 * s, 0.24 * s, 0.06 * s, 0.52 * s))
+
+    _lapiz(painter, "#ffffff", grosor=max(1.3, size / 8.5))
+    painter.drawLine(QPointF(0.44 * s, 0.51 * s), QPointF(0.53 * s, 0.61 * s))
+    painter.drawLine(QPointF(0.53 * s, 0.61 * s), QPointF(0.72 * s, 0.40 * s))
+    painter.end()
+    return pixmap
+
+
+@lru_cache(maxsize=32)
+def icono_candado(size: int = SIZE) -> QPixmap:
+    """Candado: un jugador al que se le ha bloqueado la entrada."""
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    s = float(size)
+    grosor = max(1.3, size / 11.0)
+
+    _lapiz(painter, "#7d2a24", grosor=grosor)
+    painter.drawArc(QRectF(0.30 * s, 0.12 * s, 0.40 * s, 0.42 * s), 0, 180 * 16)
+    painter.drawLine(QPointF(0.30 * s, 0.32 * s), QPointF(0.30 * s, 0.44 * s))
+    painter.drawLine(QPointF(0.70 * s, 0.32 * s), QPointF(0.70 * s, 0.44 * s))
+
+    _lapiz(painter, "#7d2a24", grosor=grosor)
+    painter.setBrush(QColor("#d95a4e"))
+    painter.drawRoundedRect(QRectF(0.18 * s, 0.42 * s, 0.64 * s, 0.46 * s), 0.08 * s, 0.08 * s)
+
+    _relleno(painter, "#78211c")
+    painter.drawEllipse(QRectF(0.45 * s, 0.56 * s, 0.10 * s, 0.10 * s))
+    painter.drawRect(QRectF(0.475 * s, 0.64 * s, 0.05 * s, 0.10 * s))
+    painter.end()
+    return pixmap
+
+
+@lru_cache(maxsize=32)
+def icono_salida(size: int = SIZE) -> QPixmap:
+    """Puerta con una flecha: sacar a un jugador del juego ahora mismo."""
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    s = float(size)
+    grosor = max(1.0, size / 13.0)
+
+    _lapiz(painter, "#7a4a1e", grosor=grosor)
+    painter.setBrush(QColor("#b97a3e"))
+    painter.drawRoundedRect(QRectF(0.12 * s, 0.10 * s, 0.38 * s, 0.80 * s), 0.04 * s, 0.04 * s)
+    _relleno(painter, "#f2c14e")
+    painter.drawEllipse(QRectF(0.38 * s, 0.48 * s, 0.07 * s, 0.07 * s))
+
+    _lapiz(painter, "#1f6f3a", grosor=max(1.4, size / 7.5))
+    painter.drawLine(QPointF(0.55 * s, 0.50 * s), QPointF(0.88 * s, 0.50 * s))
+    painter.drawLine(QPointF(0.88 * s, 0.50 * s), QPointF(0.76 * s, 0.36 * s))
+    painter.drawLine(QPointF(0.88 * s, 0.50 * s), QPointF(0.76 * s, 0.64 * s))
+    painter.end()
+    return pixmap
+
+
+@lru_cache(maxsize=32)
+def icono_lista(size: int = SIZE) -> QPixmap:
+    """Portapapeles con nombres: administrar invitados y bloqueados."""
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    s = float(size)
+    grosor = max(1.0, size / 16.0)
+
+    _lapiz(painter, "#5b3a16", grosor=grosor)
+    painter.setBrush(QColor("#e8c98a"))
+    painter.drawRoundedRect(QRectF(0.17 * s, 0.14 * s, 0.66 * s, 0.76 * s), 0.08 * s, 0.08 * s)
+    _relleno(painter, "#8a5a2b")
+    painter.drawRoundedRect(QRectF(0.34 * s, 0.08 * s, 0.32 * s, 0.16 * s), 0.05 * s, 0.05 * s)
+
+    _lapiz(painter, "#7a5527", grosor=max(1.0, size / 14.0))
+    for y in (0.40, 0.54, 0.68):
+        painter.drawLine(QPointF(0.30 * s, y * s), QPointF(0.68 * s, y * s))
+    painter.end()
+    return pixmap
+
+
+@lru_cache(maxsize=32)
+def icono_si(size: int = SIZE) -> QPixmap:
+    """Circulo verde con un visto: una casilla afirmativa de la tabla."""
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    s = float(size)
+    _relleno(painter, "#2e9b4f")
+    painter.drawEllipse(QRectF(0.08 * s, 0.08 * s, 0.84 * s, 0.84 * s))
+    _lapiz(painter, "#ffffff", grosor=max(1.2, size / 8.0))
+    painter.drawLine(QPointF(0.28 * s, 0.52 * s), QPointF(0.44 * s, 0.68 * s))
+    painter.drawLine(QPointF(0.44 * s, 0.68 * s), QPointF(0.72 * s, 0.34 * s))
+    painter.end()
+    return pixmap
+
+
+@lru_cache(maxsize=32)
+def icono_no(size: int = SIZE) -> QPixmap:
+    """Circulo gris con un guion: una casilla negativa de la tabla."""
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    s = float(size)
+    _relleno(painter, "#7d848c")
+    painter.drawEllipse(QRectF(0.08 * s, 0.08 * s, 0.84 * s, 0.84 * s))
+    _lapiz(painter, "#ffffff", grosor=max(1.3, size / 7.5))
+    painter.drawLine(QPointF(0.30 * s, 0.50 * s), QPointF(0.70 * s, 0.50 * s))
+    painter.end()
+    return pixmap
+
+
+@lru_cache(maxsize=32)
+def icono_conectar(size: int = 48) -> QPixmap:
+    """Dos bloques juntos (Java y Bedrock): entrar desde cualquier plataforma.
+
+    La cabecera de «Unirse» usa este dibujo en vez de un icono generico del
+    escritorio: se reconoce al instante que en esa pestana se conectan tanto
+    jugadores de PC como de movil o consola.
+    """
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    lado = max(1, int(round(size * 0.68)))
+    painter.drawPixmap(0, 0, bloque_java(lado))
+    painter.drawPixmap(size - lado, size - lado, bloque_bedrock(lado))
+    painter.end()
+    return pixmap
+
+
+@lru_cache(maxsize=32)
+def icono_copiar(size: int = SIZE) -> QPixmap:
+    """Dos hojas superpuestas: copiar una direccion al portapapeles.
+
+    La hoja de delante es clara y la de atras verde para que el simbolo se vea
+    tanto en un boton verde como en un fondo claro u oscuro.
+    """
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    s = float(size)
+    grosor = max(1.0, size / 15.0)
+
+    # Hoja de atras.
+    _lapiz(painter, "#245c2e", grosor=grosor)
+    painter.setBrush(QColor("#7fc98a"))
+    painter.drawRoundedRect(QRectF(0.30 * s, 0.08 * s, 0.56 * s, 0.66 * s), 0.05 * s, 0.05 * s)
+
+    # Hoja de delante.
+    _lapiz(painter, "#263238", grosor=grosor)
+    painter.setBrush(QColor("#f7faf5"))
+    painter.drawRoundedRect(QRectF(0.14 * s, 0.24 * s, 0.56 * s, 0.68 * s), 0.05 * s, 0.05 * s)
+
+    _lapiz(painter, "#5f6f60", grosor=max(1.0, size / 18.0))
+    for y in (0.43, 0.56, 0.69):
+        painter.drawLine(QPointF(0.28 * s, y * s), QPointF(0.56 * s, y * s))
+    painter.end()
+    return pixmap
+
+
+def icono_de_pixmap(pixmap: QPixmap) -> QIcon:
+    """Envuelve un dibujo en un ``QIcon`` (con el tamano que ya tiene)."""
+    return QIcon(pixmap)
+
+
 __all__ = [
     "SIZE",
     "PlatformBadge",
     "bloque_bedrock",
     "bloque_java",
+    "icono_candado",
+    "icono_conectar",
     "icono_consola",
+    "icono_copiar",
+    "icono_corona",
     "icono_cuadro",
+    "icono_de_pixmap",
     "icono_escudo",
     "icono_jugador",
+    "icono_lista",
     "icono_mochila",
     "icono_mod",
     "icono_mundo",
+    "icono_no",
     "icono_pack",
+    "icono_pase",
     "icono_plataforma",
     "icono_plugin",
+    "icono_salida",
+    "icono_si",
     "marcar_desactivado",
     "pixmap_de_bytes",
     "punto_estado",
