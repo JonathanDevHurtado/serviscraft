@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtCore import QEvent, QTimer, Qt, QUrl, Signal
+from PySide6.QtCore import QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
@@ -35,6 +35,7 @@ from .common import (
     FlowRow,
     MetricBar,
     OperationBar,
+    PaginaDesplazable,
     StatusBadge,
     empty_state,
     make_button,
@@ -51,6 +52,7 @@ from .logs_panel import LogsPanel
 from .mc_icons import PlatformBadge, icono_cuadro
 from .mods_panel import ModsPanel
 from .players_panel import PlayersPanel
+from .plugins_panel import PluginsPanel
 from .properties_panel import PropertiesPanel
 from .server_list import ServerSidebar
 from .server_preview import icon_pixmap
@@ -58,70 +60,6 @@ from .settings_dialog import PreferencesDialog, ServerSettingsDialog
 from .tasks import TaskRunner
 
 logger = get_logger("ui.main")
-
-
-class PaginaDesplazable(QScrollArea):
-    """Pestana con barra vertical cuando el contenido no cabe a lo alto.
-
-    Con el mosaico automatico la ventana puede quedarse con menos alto del que
-    necesita una pestana (la de «Mods» es la mas larga). Si no hay barra, Qt
-    comprime los paneles por debajo de su tamano minimo y los botones de una
-    fila se dibujan encima del texto siguiente.
-
-    El ancho lo manda siempre la ventana (como si no hubiera area): los paneles
-    ya saben envolver sus barras y recortar sus textos con puntos suspensivos.
-    El alto es el minimo que pide el panel a ese ancho (contando las barras ya
-    envueltas) o el de la ventana si sobra sitio. El diseno se activa a mano
-    para que funcione tambien cuando la ventana esta oculta (en las pruebas).
-    """
-
-    def __init__(self, panel: QWidget) -> None:
-        super().__init__()
-        self.setWidget(panel)
-        self.setWidgetResizable(False)  # el tamano lo pone `_acomodar`
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.viewport().setAutoFillBackground(False)
-        panel.setAutoFillBackground(False)
-        self._acomodando = False
-        panel.installEventFilter(self)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802 - API de Qt
-        super().resizeEvent(event)
-        self._acomodar()
-
-    def eventFilter(self, objeto, evento):  # noqa: N802 - API de Qt
-        if objeto is self.widget() and evento.type() in (
-            QEvent.Type.LayoutRequest,
-            QEvent.Type.Resize,
-        ):
-            self._acomodar()
-        return super().eventFilter(objeto, evento)
-
-    def _acomodar(self) -> None:
-        panel = self.widget()
-        if panel is None or self._acomodando:
-            return
-        self._acomodando = True
-        try:
-            ancho = max(1, self.viewport().width())
-            alto_vista = max(1, self.viewport().height())
-            diseno = panel.layout()
-            # Primero se fija el ancho: las barras de botones (FlowRow) recalculan
-            # su alto minimo al envolver. Despues se pide el alto minimo del
-            # panel a ese ancho y se estira hasta la ventana si hay sitio.
-            if panel.width() != ancho:
-                panel.setGeometry(0, 0, ancho, panel.height())
-            if diseno is not None:
-                diseno.activate()
-            necesario = max(panel.minimumSizeHint().height(), 1)
-            alto = max(alto_vista, necesario)
-            if panel.width() != ancho or panel.height() != alto:
-                panel.setGeometry(0, 0, ancho, alto)
-            if diseno is not None:
-                diseno.activate()
-        finally:
-            self._acomodando = False
 
 
 def envolver_en_pagina(panel: QWidget) -> PaginaDesplazable:
@@ -489,6 +427,7 @@ class MainWindow(QMainWindow):
         self.console = ConsolePanel(self.manager, self.runner)
         self.join = JoinPanel(self.manager, self.runner)
         self.mods = ModsPanel(self.manager, self.runner)
+        self.plugins = PluginsPanel(self.manager, self.runner)
         self.properties = PropertiesPanel(self.manager, self.runner)
         self.files = FilesPanel(self.manager, self.runner)
         self.players = PlayersPanel(self.manager, self.runner)
@@ -498,7 +437,12 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(envolver_en_pagina(self.console), "Consola")
         self.tabs.addTab(envolver_en_pagina(self.join), "Unirse")
-        self.tabs.addTab(envolver_en_pagina(self.mods), "Mods")
+        self._mods_tab = self.tabs.addTab(envolver_en_pagina(self.mods), "Mods")
+        self._plugins_tab = self.tabs.addTab(envolver_en_pagina(self.plugins), "Plugins")
+        # La pestana de plugins solo tiene sentido en servidores Paper; se
+        # oculta (no se elimina) para no reordenar las demas al cambiar de
+        # servidor. Al principio no hay ninguno seleccionado.
+        self.tabs.setTabVisible(self._plugins_tab, False)
         self.tabs.addTab(envolver_en_pagina(self.properties), "Propiedades")
         self.tabs.addTab(envolver_en_pagina(self.files), "Archivos")
         self.tabs.addTab(envolver_en_pagina(self.players), "Jugadores")
@@ -512,6 +456,8 @@ class MainWindow(QMainWindow):
         self.properties.saved.connect(self.details.refresh_appearance)
         self.backups.changed.connect(lambda: None)
         self.mods.changed.connect(lambda: self.properties.load(self._spec()))
+        self.plugins.changed.connect(self.mods.refresh)
+        self.plugins.changed.connect(lambda: self.properties.load(self._spec()))
         self.join.changed.connect(lambda: self.refresh_servers(force=True))
         self.logs.missing_mods_requested.connect(self._open_missing_mods)
         self.details.settings_requested.connect(self._open_settings_for)
@@ -663,6 +609,8 @@ class MainWindow(QMainWindow):
             self.console.set_server(None, ServerState.MISSING)
             self.join.set_server(None, running=False)
             self.mods.set_server(None, running=False)
+            self.plugins.set_server(None, running=False)
+            self.tabs.setTabVisible(self._plugins_tab, False)
             self.properties.set_server(None)
             self.files.set_server(None, running=False)
             self.players.set_server(None, running=False)
@@ -748,6 +696,11 @@ class MainWindow(QMainWindow):
         self.console.set_server(spec, view.state)
         self.join.set_server(spec, running=running)
         self.mods.set_server(spec, running=running)
+        self.plugins.set_server(spec, running=running)
+        con_plugins = spec.supports_plugins
+        self.tabs.setTabVisible(self._plugins_tab, con_plugins)
+        if not con_plugins and self.tabs.currentIndex() == self._plugins_tab:
+            self.tabs.setCurrentIndex(self._mods_tab)
         self.properties.set_server(spec)
         self.files.set_server(spec, running=running)
         self.players.set_server(spec, running=running)
@@ -769,27 +722,57 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         values = dialog.values()
+        contenido = dialog.selected_content()
         logger.info("Creando servidor desde la interfaz: %s", values.get("name"))
 
-        def work(*, context) -> str:
+        def work(*, context) -> tuple[str, list[str], list[str]]:
             spec = self.manager.create_server(
                 on_progress=context.progress,
                 should_cancel=lambda: context.cancelled,
                 **values,
             )
-            return spec.id
+            # El servidor ya existe: si una descarga falla no se pierde. Se
+            # informa de cada fallo y se sigue con el resto del contenido.
+            instalados: list[str] = []
+            fallos: list[str] = []
+            for seleccion in contenido:
+                if context.cancelled:
+                    break
+                try:
+                    instalados.extend(
+                        self.manager.install_content(
+                            spec.id,
+                            [seleccion],
+                            on_progress=context.progress,
+                            should_cancel=lambda: context.cancelled,
+                        )
+                    )
+                except ServiscraftError as exc:
+                    fallos.append(f"{seleccion.project.title}: {exc}")
+            return spec.id, instalados, fallos
 
-        def done(server_id: str) -> None:
+        def done(result: tuple[str, list[str], list[str]]) -> None:
+            server_id, instalados, fallos = result
             self.refresh_servers(force=True)
             QTimer.singleShot(250, lambda: self.select_server(server_id))
             spec = self.manager.get(server_id)
-            show_info(
-                self,
-                "Servidor creado",
+            texto = (
                 f"«{spec.name}» esta listo y detenido.\n\n"
                 f"Puedes iniciarlo cuando quieras con el boton «Iniciar».\n"
-                f"Puerto: {spec.port}",
+                f"Puerto: {spec.port}"
             )
+            if instalados:
+                texto += (
+                    f"\n\nSe instalaron {len(instalados)} ficheros de contenido. "
+                    "Estaran activos al iniciar el servidor."
+                )
+            if fallos:
+                texto += (
+                    "\n\nNo se pudo instalar todo el contenido:\n"
+                    + "\n".join(f"  · {fallo}" for fallo in fallos)
+                    + "\n\nPuedes intentarlo de nuevo desde la pestana Mods o Plugins."
+                )
+            show_info(self, "Servidor creado", texto)
 
         self.operation.start("Creando el servidor...", cancellable=True)
         self.runner.submit(
@@ -1359,6 +1342,8 @@ class MainWindow(QMainWindow):
             self.logs.refresh()
         elif widget is self.mods:
             self.mods.refresh()
+        elif widget is self.plugins:
+            self.plugins.activate()
         elif widget is self.join:
             self.join.apply_bedrock_config()
         elif widget is self.details:
@@ -1488,6 +1473,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.console.shutdown()
+        self.plugins.shutdown()
         self.runner.shutdown(4000)
         logger.info("Serviscraft cerrado")
         event.accept()

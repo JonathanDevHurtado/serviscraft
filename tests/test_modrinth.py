@@ -97,6 +97,26 @@ class TestBusqueda:
             ["versions:1.21.4"],
         ]
 
+    def test_el_orden_llega_a_modrinth_y_usa_descargas_sin_busqueda(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """La lista de ordenes del catalogo se traduce en el parametro ``index``."""
+        vistos: list[str] = []
+
+        def falso_json(url: str):
+            consulta = parse_qs(urlsplit(url).query)
+            vistos.append(consulta["index"][0])
+            return {"hits": []}
+
+        monkeypatch.setattr(modrinth, "_request_json", falso_json)
+        modrinth.search_projects("", project_type="plugin")
+        modrinth.search_projects("mapa", project_type="plugin", index="updated")
+        modrinth.search_projects("mapa", project_type="plugin", index="inventado")
+
+        # Sin texto se muestran los mas descargados; un orden desconocido cae
+        # en relevancia para que Modrinth no rechace la consulta.
+        assert vistos == ["downloads", "updated", "relevance"]
+
     def test_devuelve_la_descripcion_y_las_descargas(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             modrinth,
@@ -445,3 +465,81 @@ class TestInformacionDeLosResultados:
         )
 
         assert proyecto.loaders == ("quilt", "neoforge")
+
+
+class TestSiguientesPaginasYCompatibilidad:
+    def test_offset_y_categoria_llegan_a_modrinth(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        visto: dict[str, str] = {}
+
+        def falso_json(url: str):
+            visto["url"] = url
+            return {"hits": []}
+
+        monkeypatch.setattr(modrinth, "_request_json", falso_json)
+        modrinth.search_projects(
+            "mapa",
+            project_type="plugin",
+            game_version="1.21.4",
+            loaders=("paper",),
+            category="utility",
+            offset=40,
+        )
+
+        consulta = parse_qs(urlsplit(visto["url"]).query)
+        assert consulta["offset"] == ["40"]
+        assert json.loads(consulta["facets"][0]) == [
+            ["project_type:plugin"],
+            ["versions:1.21.4"],
+            ["categories:paper"],
+            ["categories:utility"],
+        ]
+
+    def test_una_version_incompatible_no_se_confunde_con_la_buena(self) -> None:
+        buena = modrinth.parse_release(
+            "p",
+            _version(filename="buena.jar", game_versions=("1.21.4",), loaders=("paper",)),
+        )
+        otra = modrinth.parse_release(
+            "p",
+            _version(filename="otra.jar", game_versions=("1.20.1",), loaders=("paper",)),
+        )
+        assert buena is not None and otra is not None
+
+        assert modrinth.release_is_compatible(
+            buena, game_version="1.21.4", loaders=("paper", "spigot")
+        )
+        assert not modrinth.release_is_compatible(
+            buena, game_version="1.20.1", loaders=("paper",)
+        )
+        assert not modrinth.release_is_compatible(
+            buena, game_version="1.21.4", loaders=("fabric",)
+        )
+        # Sin version concreta (latest) solo manda el cargador.
+        assert modrinth.release_is_compatible(
+            buena, game_version="latest", loaders=("paper",)
+        )
+
+        assert (
+            modrinth.choose_compatible_release(
+                [otra, buena], game_version="1.21.4", loaders=("paper",)
+            )
+            is buena
+        )
+        assert (
+            modrinth.choose_compatible_release(
+                [otra], game_version="1.21.4", loaders=("paper",)
+            )
+            is None
+        )
+
+    def test_una_version_sin_cargadores_anunciados_se_acepta(self) -> None:
+        release = modrinth.parse_release(
+            "p",
+            _version(game_versions=("1.21.4",), loaders=()),
+        )
+        assert release is not None
+        assert modrinth.release_is_compatible(
+            release, game_version="1.21.4", loaders=("paper",)
+        )

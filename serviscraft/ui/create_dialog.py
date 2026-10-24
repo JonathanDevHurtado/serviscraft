@@ -14,21 +14,26 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from ..core import modrinth
 from ..core.appconfig import AppConfig
 from ..core.errors import ServiscraftError, ValidationError
 from ..core.logging_setup import get_logger
 from ..core.manager import ServerManager, jvm_overhead_mb
 from ..core.models import ServerType, format_bytes
+from ..core.modrinth import ContentSelection
 from ..core.paths import JAVA_TAGS, MAX_MEMORY_MB, MIN_MEMORY_MB
 from ..core.validation import validate_memory_mb, validate_minecraft_version, validate_name, validate_port
 from ..core.versions import FALLBACK_VERSIONS, fetch_versions, recommended_java_tag, version_choices
 from .common import NumberBox, NumberSlider, hint_label, make_button
+from .content_picker import ContentPickerDialog
 from .dialogs import show_error
 from .tasks import TaskRunner
 
@@ -51,6 +56,10 @@ class CreateServerDialog(QDialog):
         self.config = config
         self._java_manual = False
         self._modpack = None
+        #: Mods o plugins elegidos en el catalogo. No se descargan aqui: se
+        #: instalan cuando el servidor ya existe.
+        self._content: list[ContentSelection] = []
+        self._content_notice = ""
         self.setWindowTitle("Nuevo servidor de Minecraft")
         self.setMinimumWidth(620)
 
@@ -138,6 +147,50 @@ class CreateServerDialog(QDialog):
         self.modpack_label = hint_label("Ningun modpack elegido. Si no marcas la casilla, eliges el tipo arriba.")
         modpack_form.addRow("", self.modpack_label)
         layout.addWidget(modpack_box)
+
+        # ----------------------------------------------------------- contenido
+        content_box = QGroupBox("Contenido (opcional)")
+        content_layout = QVBoxLayout(content_box)
+        content_layout.setSpacing(6)
+
+        self.content_hint = hint_label("")
+        content_layout.addWidget(self.content_hint)
+
+        content_row = QHBoxLayout()
+        content_row.setSpacing(8)
+        self.content_button = make_button(
+            "Anadir plugins...",
+            icon_names=("system-search", "package-x-generic"),
+            tooltip="Buscar en Modrinth e ir apuntando lo que se instalara al crear el servidor",
+        )
+        self.content_button.clicked.connect(self._choose_content)
+        content_row.addWidget(self.content_button)
+        self.content_remove_button = make_button(
+            "Quitar seleccionado",
+            icon_names=("edit-delete", "user-trash"),
+            danger=True,
+            tooltip="Quitar de la lista el contenido seleccionado",
+        )
+        self.content_remove_button.setEnabled(False)
+        self.content_remove_button.clicked.connect(self._remove_content)
+        content_row.addWidget(self.content_remove_button)
+        content_row.addStretch(1)
+        content_layout.addLayout(content_row)
+
+        self.content_list = QListWidget()
+        self.content_list.setObjectName("ContentSelectedList")
+        self.content_list.setMaximumHeight(104)
+        self.content_list.setVisible(False)
+        self.content_list.itemSelectionChanged.connect(
+            lambda: self.content_remove_button.setEnabled(self.content_list.currentRow() >= 0)
+        )
+        content_layout.addWidget(self.content_list)
+
+        self.content_status = hint_label(
+            "No hay contenido en la lista. El servidor se creara sin mods ni plugins anadidos."
+        )
+        content_layout.addWidget(self.content_status)
+        layout.addWidget(content_box)
 
         # ----------------------------------------------------------- recursos
         resources = QGroupBox("Recursos y red")
@@ -288,6 +341,7 @@ class CreateServerDialog(QDialog):
             if index >= 0:
                 self.type_combo.setCurrentIndex(index)
             self.modpack_label.setText("Ningun modpack elegido. Si no marcas la casilla, eliges el tipo arriba.")
+        self._refresh_content()
         self._update_summary()
 
     def _choose_modpack(self) -> None:
@@ -308,6 +362,7 @@ class CreateServerDialog(QDialog):
             f"Modpack «{plan.title or plan.slug}» {plan.version_number}: "
             f"cargador {plan.loader}, Minecraft {plan.minecraft_version}."
         )
+        self._refresh_content()
         self._update_summary()
 
     def _on_version_changed(self) -> None:
@@ -318,6 +373,8 @@ class CreateServerDialog(QDialog):
             self.java_combo.blockSignals(True)
             self.java_combo.setCurrentText(recommended)
             self.java_combo.blockSignals(False)
+        if hasattr(self, "content_list"):
+            self._refresh_content()
         self._update_summary()
 
     def _on_type_changed(self) -> None:
@@ -333,7 +390,156 @@ class CreateServerDialog(QDialog):
             self.bedrock.setChecked(False)
         self.bedrock.setEnabled(soporta_bedrock)
         self.bedrock_note.setVisible(soporta_bedrock)
+        if hasattr(self, "content_list"):
+            self._refresh_content()
         self._update_summary()
+
+    # ============================================================== contenido
+    def _content_target(self) -> tuple[str, ServerType, str, tuple[str, ...]] | None:
+        """Destino del contenido: modo, tipo, version y cargadores.
+
+        Devuelve ``None`` en Vanilla, que no admite ni mods ni plugins. Con un
+        modpack manda el cargador y la version que exige el propio pack.
+        """
+        if self._modpack is not None:
+            loaders = (
+                (self._modpack.loader,)
+                if self._modpack.loader
+                else modrinth.loaders_for(ServerType.MODRINTH)
+            )
+            return "mods", ServerType.MODRINTH, self._modpack.minecraft_version, loaders
+        server_type = self.server_type
+        version = self.version_combo.currentText().strip() or "latest"
+        if server_type.supports_plugins:
+            return "plugins", server_type, version, modrinth.loaders_for(server_type)
+        if server_type.supports_mods:
+            return "mods", server_type, version, modrinth.loaders_for(server_type)
+        return None
+
+    def _refresh_content(self, notice: str = "") -> None:
+        """Revisa que lo elegido siga valiendo para el tipo y la version actuales."""
+        target = self._content_target()
+        conservados: list[ContentSelection] = []
+        descartados = 0
+        if target is None:
+            descartados = len(self._content)
+        else:
+            modo, _tipo, version, loaders = target
+            esperado = "plugin" if modo == "plugins" else "mod"
+            for seleccion in self._content:
+                tipo_proyecto = (seleccion.project.project_type or "").strip().lower()
+                if tipo_proyecto and tipo_proyecto != esperado:
+                    descartados += 1
+                    continue
+                if not modrinth.release_is_compatible(
+                    seleccion.release, game_version=version, loaders=loaders
+                ):
+                    descartados += 1
+                    continue
+                conservados.append(seleccion)
+        self._content = conservados
+        if target is None:
+            self.content_button.setText("Anadir plugins o mods...")
+            self.content_button.setEnabled(False)
+            self.content_hint.setText(
+                "Los servidores Vanilla no admiten mods ni plugins. Elige Paper para "
+                "plugins, o Fabric, Forge o un modpack para mods."
+            )
+        else:
+            modo = target[0]
+            if modo == "plugins":
+                self.content_button.setText("Anadir plugins...")
+                self.content_hint.setText(
+                    "Busca plugins en Modrinth y apunta los que quieras. Se instalaran "
+                    "justo despues de crear el servidor, sin bloquear la creacion."
+                )
+            else:
+                self.content_button.setText("Anadir mods...")
+                self.content_hint.setText(
+                    "Busca mods en Modrinth y apunta los que quieras. Se instalaran "
+                    "justo despues de crear el servidor, sin bloquear la creacion."
+                )
+            self.content_button.setEnabled(True)
+
+        self.content_list.clear()
+        for seleccion in self._content:
+            item = QListWidgetItem(
+                f"{seleccion.project.title} · {seleccion.release.version_number} "
+                f"(Minecraft {', '.join(seleccion.release.game_versions[:2]) or '?'})"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, seleccion)
+            item.setToolTip(
+                f"{seleccion.project.title}\n"
+                f"Version: {seleccion.release.version_number}\n"
+                f"Fichero: {seleccion.release.filename}\n"
+                f"Minecraft: {', '.join(seleccion.release.game_versions) or 'sin datos'}\n"
+                f"Cargador: {', '.join(seleccion.release.loaders) or 'sin datos'}"
+            )
+            self.content_list.addItem(item)
+        self.content_list.setVisible(bool(self._content))
+
+        total = len(self._content)
+        if notice:
+            self.content_status.setText(notice)
+        elif descartados:
+            self.content_status.setText(
+                f"Se quitaron {descartados} "
+                f"{'contenido' if descartados == 1 else 'contenidos'} que ya no "
+                "encajaban con el tipo o la version elegidos."
+            )
+        elif total:
+            que = "plugin" if target and target[0] == "plugins" else "mod"
+            if total != 1:
+                que += "s"
+            self.content_status.setText(
+                f"{total} {que} en la lista. Se instalaran al crear el servidor."
+            )
+        else:
+            self.content_status.setText(
+                "No hay contenido en la lista. El servidor se creara sin mods ni "
+                "plugins anadidos."
+            )
+        self.content_remove_button.setEnabled(self.content_list.currentRow() >= 0)
+        if hasattr(self, "summary"):
+            self._update_summary()
+
+    def _choose_content(self) -> None:
+        target = self._content_target()
+        if target is None:
+            return
+        modo, server_type, version, loaders = target
+        dialog = ContentPickerDialog(
+            self.runner,
+            mode=modo,
+            server_type=server_type,
+            version=version,
+            loaders=loaders,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        elegidos = dialog.values()
+        if not elegidos:
+            return
+        por_proyecto = {seleccion.project.id: seleccion for seleccion in self._content}
+        for seleccion in elegidos:
+            por_proyecto[seleccion.project.id] = seleccion
+        self._content = list(por_proyecto.values())
+        self._refresh_content(
+            f"Anadido a la lista. Se instalara al crear el servidor: "
+            f"{len(elegidos)} {'plugin' if modo == 'plugins' else 'mod'}"
+            f"{'' if len(elegidos) == 1 else 's'}."
+        )
+
+    def _remove_content(self) -> None:
+        row = self.content_list.currentRow()
+        if 0 <= row < len(self._content):
+            del self._content[row]
+            self._refresh_content("Contenido quitado de la lista.")
+
+    def selected_content(self) -> list[ContentSelection]:
+        """Contenido elegido, para instalarlo cuando el servidor ya exista."""
+        return list(self._content)
 
     def _update_summary(self) -> None:
         memory = self.memory.value()
@@ -349,9 +555,16 @@ class CreateServerDialog(QDialog):
         if self._modpack is not None:
             pack = f" · modpack «{self._modpack.title or self._modpack.slug}»"
         bedrock = " · tambien Bedrock" if self._bedrock_activo() else ""
+        contenido = ""
+        if self._content:
+            target = self._content_target()
+            que = "plugin" if target and target[0] == "plugins" else "mod"
+            if len(self._content) != 1:
+                que += "s"
+            contenido = f" · {len(self._content)} {que}"
         self.summary.setText(
             f"{self.server_type.label} {version} · {format_bytes(memory * 1024 * 1024)} de RAM · "
-            f"puerto {self.port.value()} · {scope}{pack}{bedrock}"
+            f"puerto {self.port.value()} · {scope}{pack}{bedrock}{contenido}"
         )
         if hasattr(self, "java_note"):
             recommended = recommended_java_tag(version)

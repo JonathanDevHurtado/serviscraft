@@ -19,7 +19,7 @@ pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox  # noqa: E402
 
 from serviscraft.core import paths  # noqa: E402
 from serviscraft.core.appconfig import AppConfig  # noqa: E402
@@ -274,11 +274,12 @@ class TestComponentes:
 class TestVentanaPrincipal:
     def test_se_construye(self, window: MainWindow) -> None:
         assert window.windowTitle().startswith("Serviscraft")
-        assert window.tabs.count() == 9
-        assert [window.tabs.tabText(i) for i in range(9)] == [
+        assert window.tabs.count() == 10
+        assert [window.tabs.tabText(i) for i in range(10)] == [
             "Consola",
             "Unirse",
             "Mods",
+            "Plugins",
             "Propiedades",
             "Archivos",
             "Jugadores",
@@ -292,6 +293,26 @@ class TestVentanaPrincipal:
         window._on_views_ready([])
         assert window.current_id is None
         assert not window.action_start.isEnabled()
+
+    def test_la_pestana_plugins_solo_aparece_en_servidores_paper(
+        self, window: MainWindow, store: ServerStore, qapp: QApplication
+    ) -> None:
+        paper = make_spec(id="servidor-paper01", type=ServerType.PAPER)
+        store.prepare_dirs(paper.id)
+        store.save(paper)
+        window._on_views_ready([ServerView(spec=paper, state=ServerState.CREATED)])
+        qapp.processEvents()
+        indice = _indice_pestana(window, "Plugins")
+        assert window.tabs.isTabVisible(indice)
+        assert window.plugins.catalog.spec is paper
+
+        vanilla = make_spec(id="servidor-vainilla", type=ServerType.VANILLA)
+        store.prepare_dirs(vanilla.id)
+        store.save(vanilla)
+        window._on_views_ready([ServerView(spec=vanilla, state=ServerState.CREATED)])
+        qapp.processEvents()
+        assert not window.tabs.isTabVisible(indice)
+        assert window.plugins.catalog.spec is None
 
     def test_con_servidores_detectados(
         self, window: MainWindow, store: ServerStore, qapp: QApplication
@@ -704,6 +725,136 @@ class TestDialogosDelFlujoPrincipal:
         finally:
             dialogo.close()
 
+    def test_el_asistente_prepara_el_contenido_segun_el_tipo(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        from serviscraft.ui.create_dialog import CreateServerDialog
+        from serviscraft.ui.tasks import TaskRunner
+
+        dialogo = CreateServerDialog(
+            ServerManager(store=store, config=config), TaskRunner(), config
+        )
+        try:
+            # Paper es el valor inicial: el boton habla de plugins.
+            assert dialogo.server_type is ServerType.PAPER
+            assert dialogo.content_button.isEnabled()
+            assert "plugins" in dialogo.content_button.text()
+
+            indice = dialogo.type_combo.findData(ServerType.FABRIC.value)
+            dialogo.type_combo.setCurrentIndex(indice)
+            assert "mods" in dialogo.content_button.text()
+            assert dialogo.content_button.isEnabled()
+
+            indice = dialogo.type_combo.findData(ServerType.VANILLA.value)
+            dialogo.type_combo.setCurrentIndex(indice)
+            assert not dialogo.content_button.isEnabled()
+            assert "Vanilla" in dialogo.content_hint.text()
+        finally:
+            dialogo.close()
+
+    def test_el_contenido_elegido_se_quita_si_cambia_el_tipo(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        from serviscraft.core.modrinth import ContentSelection, Project, Release
+        from serviscraft.ui.create_dialog import CreateServerDialog
+        from serviscraft.ui.tasks import TaskRunner
+
+        dialogo = CreateServerDialog(
+            ServerManager(store=store, config=config), TaskRunner(), config
+        )
+        try:
+            dialogo.version_combo.setCurrentText("1.21.4")
+            proyecto = Project(
+                "p1",
+                "essentialsx",
+                "EssentialsX",
+                "Comandos",
+                10,
+                project_type="plugin",
+            )
+            release = Release(
+                "p1",
+                "EssentialsX 1.0",
+                "1.0",
+                ("1.21.4",),
+                ("paper",),
+                "https://cdn.modrinth.com/essentialsx.jar",
+                "essentialsx.jar",
+            )
+            dialogo._content = [ContentSelection(proyecto, release)]
+            dialogo._refresh_content()
+            assert len(dialogo.selected_content()) == 1
+            assert dialogo.content_list.count() == 1
+
+            indice = dialogo.type_combo.findData(ServerType.FABRIC.value)
+            dialogo.type_combo.setCurrentIndex(indice)
+            assert dialogo.selected_content() == []
+            assert dialogo.content_list.count() == 0
+            assert "Se quitaron 1" in dialogo.content_status.text()
+        finally:
+            dialogo.close()
+
+    def test_el_selector_guarda_una_version_por_proyecto(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        from serviscraft.core.modrinth import ContentSelection, Project, Release
+        from serviscraft.ui.content_picker import ContentPickerDialog
+        from serviscraft.ui.tasks import TaskRunner
+
+        proyecto = Project(
+            "p1", "essentialsx", "EssentialsX", "Comandos", 10, project_type="plugin"
+        )
+        primera = Release(
+            "p1",
+            "EssentialsX 1.0",
+            "1.0",
+            ("1.21.4",),
+            ("paper",),
+            "https://cdn.modrinth.com/1.jar",
+            "essentialsx-1.jar",
+        )
+        segunda = Release(
+            "p1",
+            "EssentialsX 2.0",
+            "2.0",
+            ("1.21.4",),
+            ("paper",),
+            "https://cdn.modrinth.com/2.jar",
+            "essentialsx-2.jar",
+        )
+        picker = ContentPickerDialog(
+            TaskRunner(),
+            mode="plugins",
+            server_type=ServerType.PAPER,
+            version="1.21.4",
+            loaders=("paper",),
+        )
+        try:
+            # El catalogo crece al enseñar las versiones: la pagina desplazable
+            # evita que Qt lo comprima y que las tablas se solapen.
+            from PySide6.QtWidgets import QScrollArea
+
+            assert isinstance(picker.catalog_page, QScrollArea)
+            assert picker.catalog_page.widget() is picker.catalog
+            assert picker.catalog_page.minimumHeight() >= 300
+
+            picker._add(ContentSelection(proyecto, primera))
+            picker._add(ContentSelection(proyecto, segunda))
+            assert len(picker.values()) == 1
+            assert picker.values()[0].release.version_number == "2.0"
+            assert picker.selected_list.count() == 1
+            assert picker.accept_button.isEnabled()
+
+            picker.selected_list.setCurrentRow(0)
+            picker._remove()
+            assert picker.values() == []
+            assert not picker.accept_button.isEnabled()
+
+            picker.reject()
+            assert picker.catalog._closed is True
+        finally:
+            picker.close()
+
     def test_elegir_la_version_sugiere_el_java_correcto(
         self, qapp: QApplication, store: ServerStore, config: AppConfig
     ) -> None:
@@ -885,6 +1036,115 @@ class TestConsolaDelPanel:
         qapp.processEvents()
         assert consola.output.toPlainText().strip() == ""
         assert consola._lines == []
+
+    def test_el_filtro_de_texto_cuenta_solo_lo_que_se_ve(
+        self, window: MainWindow, store: ServerStore, qapp: QApplication
+    ) -> None:
+        spec = make_spec()
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.EXITED)])
+        qapp.processEvents()
+        consola = window.console
+        consola._lines.clear()
+        consola.output.clear()
+        consola._hidden = 0
+        consola._visible = 0
+        consola._append("[12:00:00] [Server thread/INFO]: Ana joined the game")
+        consola._append("[12:00:01] [Server thread/INFO]: Luis joined the game")
+        consola._append("[12:00:02] [Server thread/ERROR]: fallo de conexion")
+
+        consola.filter_input.setText("ana")
+        consola._on_filter_changed()
+        texto = consola.output.toPlainText()
+        assert "Ana joined" in texto
+        assert "Luis joined" not in texto
+        assert "fallo de conexion" not in texto
+        assert consola.line_count.text() == "1 de 3 lineas"
+        assert "filtro «ana» (1 de 3)" in consola.status_label.full_text()
+
+        consola.filter_input.clear()
+        consola._on_filter_changed()
+        assert consola.line_count.text() == "3 lineas"
+
+    def test_al_recortar_lineas_los_contadores_siguen_cuadrando(
+        self,
+        window: MainWindow,
+        store: ServerStore,
+        qapp: QApplication,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Al llegar al limite se van las mas viejas, no la cuenta."""
+        from serviscraft.ui import console_panel
+
+        spec = make_spec()
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.EXITED)])
+        qapp.processEvents()
+        consola = window.console
+        monkeypatch.setattr(console_panel, "MAX_LINES", 3)
+        consola.output.setMaximumBlockCount(3)
+        consola._clear()
+
+        for indice in range(5):
+            consola._append(f"[INFO]: linea {indice}")
+
+        assert len(consola._lines) == 3
+        assert consola._visible == 3
+        assert consola._hidden == 0
+        assert consola.line_count.text() == "3 lineas"
+        assert "linea 4" in consola.output.toPlainText()
+        assert "linea 0" not in consola.output.toPlainText()
+
+        # Lo mismo con lineas ocultas por el filtro.
+        consola.only_problems.setChecked(True)
+        consola._clear()
+        for indice in range(5):
+            consola._append(f"[INFO]: normal {indice}")
+
+        assert len(consola._lines) == 3
+        assert consola._visible == 0
+        assert consola._hidden == 3
+        assert consola.line_count.text() == "0 de 3 lineas"
+
+        # Si se recorta una linea visible mientras otras estan ocultas, el
+        # texto tambien debe desaparecer del terminal (no solo del contador).
+        consola.only_problems.setChecked(False)
+        consola._clear()
+        consola._append("[ERROR]: vieja")
+        consola.filter_input.setText("ERROR")
+        consola._on_filter_changed()
+        consola._filter_timer.stop()
+        for indice in range(3):
+            consola._append(f"[INFO]: normal {indice}")
+
+        assert "vieja" not in consola.output.toPlainText()
+        assert consola._visible == 0
+        assert consola._hidden == 3
+
+        consola._append("[ERROR]: nueva")
+        assert consola.output.toPlainText() == "[ERROR]: nueva"
+        assert consola._visible == 1
+
+    def test_la_insignia_de_estado_sigue_al_servidor(
+        self, window: MainWindow, store: ServerStore, qapp: QApplication
+    ) -> None:
+        spec = make_spec()
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.RUNNING)])
+        qapp.processEvents()
+        consola = window.console
+        assert consola.state_badge.text() == "EN VIVO"
+
+        consola.follow_button.setChecked(False)
+        assert consola.state_badge.text() == "EN PAUSA"
+        assert "en pausa" in consola.status_label.full_text().lower()
+
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.EXITED)])
+        qapp.processEvents()
+        assert consola.state_badge.text() == "DETENIDO"
 
     def test_copiar_todo_deja_la_consola_en_la_memoria(
         self, window: MainWindow, store: ServerStore, qapp: QApplication
@@ -1108,6 +1368,47 @@ class TestJugadores:
         assert window.players.chip_banned.text() == "Bloqueados: 0"
         assert window.players.chip_banned.isHidden()
 
+    def test_los_jugadores_de_bedrock_se_reconocen_por_el_punto(
+        self, window: MainWindow, store: ServerStore, qapp: QApplication
+    ) -> None:
+        """Floodgate antepone un punto: la ficha lo explica y lo cuenta."""
+        import json
+
+        spec = make_spec(type=ServerType.PAPER, bedrock=True)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        (store.data_dir(spec.id) / "whitelist.json").write_text(
+            json.dumps(
+                [
+                    {"uuid": "1", "name": "Ana"},
+                    {"uuid": "2", "name": ".Steve"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.CREATED)])
+        qapp.processEvents()
+        window.runner.wait_for_done(5000)
+        qapp.processEvents()
+
+        tabla = window.players.table
+        nombres = {tabla.item(fila, 0).text() for fila in range(tabla.rowCount())}
+        assert nombres == {"Ana", ".Steve"}
+        fila_steve = next(
+            fila for fila in range(tabla.rowCount()) if tabla.item(fila, 0).text() == ".Steve"
+        )
+        assert "Bedrock" in tabla.item(fila_steve, 0).toolTip()
+        assert not window.players.chip_bedrock.isHidden()
+        assert window.players.chip_bedrock.text() == "Bedrock: 1"
+
+        tabla.selectRow(fila_steve)
+        qapp.processEvents()
+        assert not window.players.bedrock_chip.isHidden()
+        assert "Bedrock" in window.players.actions_note.text()
+        # El nombre que se envia al servidor conserva el punto.
+        assert window.players._target_name() == ".Steve"
+        assert window.players.player_input.maxLength() == 33
+
     def test_cada_fila_lleva_la_cara_del_jugador(
         self, window: MainWindow, store: ServerStore, qapp: QApplication
     ) -> None:
@@ -1127,6 +1428,97 @@ class TestJugadores:
         tabla = window.players.table
         assert tabla.rowCount() == 1
         assert not tabla.item(0, 0).icon().isNull()
+
+    def test_las_cabezas_usan_la_skin_real_del_jugador(
+        self,
+        window: MainWindow,
+        store: ServerStore,
+        qapp: QApplication,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Los conectados y los desconectados comparten el mismo camino de skin."""
+        import json
+
+        from PySide6.QtCore import QBuffer
+        from PySide6.QtGui import QColor, QImage
+
+        from serviscraft.ui import players_panel
+
+        imagen = QImage(64, 64, QImage.Format.Format_ARGB32)
+        imagen.fill(QColor("#28c878"))
+        buffer = QBuffer()
+        buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+        assert imagen.save(buffer, "PNG")
+        skin = bytes(buffer.data())
+        buffer.close()
+        monkeypatch.setattr(players_panel, "cached_skin", lambda _name: skin)
+
+        spec = make_spec()
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        (store.data_dir(spec.id) / "whitelist.json").write_text(
+            json.dumps([{"uuid": "1", "name": "Ana"}, {"uuid": "2", "name": "luis"}]),
+            encoding="utf-8",
+        )
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.CREATED)])
+        qapp.processEvents()
+        window.runner.wait_for_done(5000)
+        qapp.processEvents()
+
+        tabla = window.players.table
+        assert tabla.rowCount() == 2
+        for fila in range(tabla.rowCount()):
+            cara = tabla.item(fila, 0).icon().pixmap(28, 28)
+            color = cara.toImage().pixelColor(cara.width() // 2, cara.height() // 2)
+            assert color.green() > color.red()
+            assert color.green() > color.blue()
+
+    def test_sin_jugadores_aparece_la_cabeza_con_signo_de_duda(
+        self, window: MainWindow, store: ServerStore, qapp: QApplication
+    ) -> None:
+        spec = make_spec()
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.CREATED)])
+        qapp.processEvents()
+        window.runner.wait_for_done(5000)
+        qapp.processEvents()
+
+        assert window.players.table.rowCount() == 0
+        assert not window.players.players_empty.isHidden()
+        assert "todavia no hay jugadores" in window.players.players_empty.title.text().lower()
+
+        # La ranura de la ficha tambien deja de estar vacia: muestra una cabeza
+        # gris con el signo de duda, no la cara de un jugador inventado.
+        pixmap = window.players.selection_slot._pixmap
+        assert not pixmap.isNull()
+        centro = pixmap.toImage().pixelColor(pixmap.width() // 2, pixmap.height() // 2)
+        assert centro.red() > 220 and centro.green() > 220 and centro.blue() > 180
+
+    def test_las_acciones_tienen_estilos_distintos_y_espaciado(
+        self, window: MainWindow, store: ServerStore, qapp: QApplication
+    ) -> None:
+        from serviscraft.core.players import PLAYER_ACTIONS
+        from serviscraft.ui import theme
+
+        spec = make_spec()
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.CREATED)])
+        qapp.processEvents()
+
+        props = {
+            boton.property("playerAction")
+            for boton in window.players.actions_row.widgets()
+        }
+        assert {action.key for action in PLAYER_ACTIONS} <= props
+        assert "inventario" in props
+        assert window.players.actions_row.flow.spacing() >= 10
+
+        css = theme.build_stylesheet(qapp.palette())
+        for key in ("op", "whitelist_add", "kick", "ban", "pardon", "inventario"):
+            assert f'playerAction="{key}"' in css
+        assert 'panelRole="stone"' in css
 
     def test_los_botones_de_jugador_tienen_nombres_cortos(
         self, window: MainWindow, store: ServerStore, qapp: QApplication
@@ -1565,6 +1957,90 @@ class TestDetalles:
         window._on_views_ready([ServerView(spec=spec, state=ServerState.CREATED)])
         esperado = format_bytes((4096 + jvm_overhead_mb(ServerType.FORGE)) * 1024 * 1024)
         assert esperado in window.details._labels["memory_limit"].text()
+
+    def test_el_resumen_y_las_seis_tarjetas_cuentan_el_servidor(
+        self, window: MainWindow, store: ServerStore, qapp: QApplication
+    ) -> None:
+        """Las tarjetas nuevas y los chips muestran los mismos datos que la ficha."""
+        spec = make_spec(
+            name="Reino Trebol",
+            type=ServerType.FABRIC,
+            version="1.21.4",
+            memory_mb=4096,
+            port=25700,
+        )
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.RUNNING)])
+        qapp.processEvents()
+
+        detalles = window.details
+        titulos = [tarjeta.title_label.full_text() for tarjeta in detalles._cards]
+        assert titulos == [
+            "Tu servidor",
+            "Como se ve en Minecraft",
+            "Recursos y puertos",
+            "Fechas y rutas",
+            "Notas",
+            "Mantenimiento",
+        ]
+        assert all(tarjeta.isVisibleTo(detalles) for tarjeta in detalles._cards)
+        assert detalles.summary_row.isVisibleTo(detalles)
+        assert detalles.empty.isHidden()
+
+        assert detalles.chip_state.text() == "Estado: En marcha"
+        assert detalles.chip_type.text() == "Tipo: Fabric"
+        assert detalles.chip_version.text() == "Minecraft: 1.21.4"
+        assert detalles.chip_memory.text() == "Memoria: 4G"
+        assert detalles.chip_port.text() == "Puerto: 25700"
+
+        # Sin servidor se apartan las tarjetas y queda el aviso centrado.
+        detalles.set_server(None, ServerState.MISSING)
+        assert not detalles.summary_row.isVisibleTo(detalles)
+        assert not any(tarjeta.isVisibleTo(detalles) for tarjeta in detalles._cards)
+        assert detalles.empty.isVisibleTo(detalles)
+        assert detalles.chip_state.text() == "Estado: Sin servidor"
+
+    def test_las_rutas_se_copian_con_un_clic(
+        self, window: MainWindow, store: ServerStore, qapp: QApplication
+    ) -> None:
+        """El icono de la ranura copia la ruta sin tener que seleccionarla."""
+        spec = make_spec()
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.CREATED)])
+        qapp.processEvents()
+
+        campo = window.details._labels["data_path"]
+        assert isinstance(campo, QLineEdit)
+        assert campo.actions(), "la ruta debe tener el boton de copiar"
+        campo.actions()[0].trigger()
+        assert QApplication.clipboard().text() == str(store.data_dir(spec.id))
+
+    def test_los_titulos_de_las_tarjetas_caben_a_480_px(
+        self, window: MainWindow, store: ServerStore, qapp: QApplication
+    ) -> None:
+        """Regresion: «Como se ve en Minecraft» se recortaba en ventana estrecha."""
+        spec = make_spec(name="Servidor supervivencia extremo")
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        window._on_views_ready([ServerView(spec=spec, state=ServerState.EXITED)])
+        window.show()
+        window.resize(480, 640)
+        for indice in range(window.tabs.count()):
+            if window.tabs.tabText(indice) == "Detalles":
+                window.tabs.setCurrentIndex(indice)
+                break
+        for _ in range(12):
+            qapp.processEvents()
+
+        recortados = [
+            etiqueta.full_text()
+            for tarjeta in window.details._cards
+            for etiqueta in (tarjeta.title_label,)
+            if etiqueta.text() != etiqueta.full_text()
+        ]
+        assert not recortados, "titulos recortados a 480 px: " + ", ".join(recortados)
 
 
 class TestAdaptabilidad:
@@ -2237,6 +2713,295 @@ class TestModpacksEnLaCreacion:
             dialogo.close()
 
 
+class TestCatalogoDeModrinth:
+    def test_la_busqueda_usa_el_orden_y_los_filtros_del_servidor(
+        self,
+        qapp: QApplication,
+        store: ServerStore,
+        config: AppConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from serviscraft.core import modrinth
+        from serviscraft.core.modrinth import Project
+        from serviscraft.ui import catalog_dialog
+        from serviscraft.ui.catalog_dialog import CatalogDialog
+        from serviscraft.ui.tasks import TaskRunner
+
+        spec = make_spec(type="FABRIC", version="1.21.4")
+        visto: dict[str, object] = {}
+
+        def falso_search(query: str, **kwargs):
+            visto["query"] = query
+            visto.update(kwargs)
+            return [
+                Project(
+                    "p1",
+                    "sodium",
+                    "Sodium",
+                    "Motor de renderizado",
+                    100,
+                    project_type="mod",
+                    server_side="required",
+                )
+            ]
+
+        monkeypatch.setattr(modrinth, "search_projects", falso_search)
+        monkeypatch.setattr(catalog_dialog.iconos_remotos, "prefetch", lambda _urls: None)
+
+        dialogo = CatalogDialog(ServerManager(store=store, config=config), TaskRunner(), spec, "mods")
+        try:
+            dialogo.search_input.setText("sodium")
+            dialogo._search_timer.stop()
+            dialogo.sort_combo.setCurrentIndex(3)  # Actualizados
+            dialogo.search()
+            _esperar(dialogo, qapp, lambda: dialogo._has_searched)
+
+            assert visto["query"] == "sodium"
+            assert visto["index"] == "updated"
+            assert visto["project_type"] == "mod"
+            assert visto["game_version"] == "1.21.4"
+            assert visto["loaders"] == dialogo.loaders
+            assert dialogo.table.rowCount() == 1
+            assert dialogo.table.item(0, 0).text() == "Sodium"
+        finally:
+            dialogo.close()
+
+    def test_el_catalogo_ensena_todas_las_versiones_y_marca_las_compatibles(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        from serviscraft.core.modrinth import Project, Release
+        from serviscraft.ui.catalog_dialog import CatalogDialog
+        from serviscraft.ui.tasks import TaskRunner
+
+        spec = make_spec(type="PAPER", version="1.21.4")
+        proyecto = Project(
+            "p1", "essentialsx", "EssentialsX", "Comandos", 10, project_type="plugin"
+        )
+        incompatible = Release(
+            "p1",
+            "EssentialsX viejo",
+            "0.9",
+            ("1.20.1",),
+            ("paper",),
+            "https://cdn.modrinth.com/0.9.jar",
+            "essentialsx-0.9.jar",
+            version_type="release",
+            published="2024-01-02T10:00:00Z",
+        )
+        compatible = Release(
+            "p1",
+            "EssentialsX nuevo",
+            "2.0",
+            ("1.21.4",),
+            ("paper",),
+            "https://cdn.modrinth.com/2.0.jar",
+            "essentialsx-2.0.jar",
+            version_type="beta",
+            published="2025-03-04T10:00:00Z",
+        )
+        dialogo = CatalogDialog(
+            ServerManager(store=store, config=config), TaskRunner(), spec, "plugins"
+        )
+        try:
+            dialogo._fill([proyecto])
+            dialogo.table.selectRow(0)
+            dialogo._fill_versions([incompatible, compatible])
+
+            assert dialogo.versions_table.rowCount() == 2
+            assert "2 versiones publicadas" in dialogo.versions_title.text()
+            assert "1 compatible" in dialogo.versions_title.text()
+            assert "essentialsx-0.9.jar" in dialogo.versions_table.item(0, 0).toolTip()
+            # La primera version compatible se elige sola.
+            assert dialogo.versions_table.currentRow() == 1
+            assert dialogo.install_button.isEnabled()
+
+            dialogo.versions_table.selectRow(0)
+            assert not dialogo.install_button.isEnabled()
+            assert "no es compatible" in dialogo.status.text()
+        finally:
+            dialogo.close()
+
+    def test_el_modo_seleccion_no_descarga_y_emite_lo_elegido(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        from serviscraft.core.modrinth import ContentSelection, Project, Release
+        from serviscraft.ui.catalog_dialog import CatalogDialog
+        from serviscraft.ui.tasks import TaskRunner
+
+        proyecto = Project(
+            "p1", "essentialsx", "EssentialsX", "Comandos", 10, project_type="plugin"
+        )
+        release = Release(
+            "p1",
+            "EssentialsX 2.0",
+            "2.0",
+            ("1.21.4",),
+            ("paper",),
+            "https://cdn.modrinth.com/2.0.jar",
+            "essentialsx-2.0.jar",
+        )
+        dialogo = CatalogDialog(
+            None,
+            TaskRunner(),
+            None,
+            "plugins",
+            selection=True,
+            server_type=ServerType.PAPER,
+            version="1.21.4",
+            loaders=("paper",),
+        )
+        capturado: list[ContentSelection] = []
+        dialogo.content_selected.connect(capturado.append)
+        try:
+            dialogo._fill([proyecto])
+            dialogo.table.selectRow(0)
+            dialogo._fill_versions([release])
+            dialogo._install_selected()
+
+            assert len(capturado) == 1
+            assert capturado[0].project.slug == "essentialsx"
+            assert capturado[0].release.filename == "essentialsx-2.0.jar"
+            assert dialogo.installed == []
+            assert "Anadido" in dialogo.status.text()
+        finally:
+            dialogo.close()
+
+    def test_cargar_mas_pide_la_siguiente_tanda_con_offset(
+        self,
+        qapp: QApplication,
+        store: ServerStore,
+        config: AppConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from serviscraft.core import modrinth
+        from serviscraft.core.modrinth import Project
+        from serviscraft.ui import catalog_dialog
+        from serviscraft.ui.catalog_dialog import CatalogDialog, SEARCH_LIMIT
+        from serviscraft.ui.tasks import TaskRunner
+
+        spec = make_spec(type="FABRIC", version="1.21.4")
+        vistos: list[int] = []
+
+        def falso_search(_query: str, **kwargs):
+            vistos.append(kwargs.get("offset", 0))
+            return [
+                Project(
+                    "p2",
+                    "lithium",
+                    "Lithium",
+                    "Optimizacion",
+                    10,
+                    project_type="mod",
+                    server_side="required",
+                )
+            ]
+
+        monkeypatch.setattr(modrinth, "search_projects", falso_search)
+        monkeypatch.setattr(catalog_dialog.iconos_remotos, "prefetch", lambda _urls: None)
+
+        dialogo = CatalogDialog(
+            ServerManager(store=store, config=config), TaskRunner(), spec, "mods"
+        )
+        try:
+            dialogo._projects = [
+                Project(
+                    "p1",
+                    "sodium",
+                    "Sodium",
+                    "Motor",
+                    20,
+                    project_type="mod",
+                    server_side="required",
+                )
+            ]
+            dialogo._offset = SEARCH_LIMIT
+            dialogo._has_more = True
+            dialogo._load_more()
+            _esperar(dialogo, qapp, lambda: len(dialogo._projects) == 2)
+
+            assert vistos == [SEARCH_LIMIT]
+            assert [p.id for p in dialogo._projects] == ["p1", "p2"]
+            assert dialogo._offset == SEARCH_LIMIT + 1
+            assert not dialogo._has_more
+        finally:
+            dialogo.close()
+
+    def test_escribir_mientras_busca_relanza_la_consulta_al_terminar(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        from serviscraft.ui.catalog_dialog import CatalogDialog
+        from serviscraft.ui.tasks import TaskRunner
+
+        spec = make_spec(type="FABRIC")
+        dialogo = CatalogDialog(ServerManager(store=store, config=config), TaskRunner(), spec, "mods")
+        try:
+            llamadas: list[str] = []
+            dialogo.search = lambda: llamadas.append("buscar")  # type: ignore[method-assign]
+            dialogo._busy = True
+            dialogo._on_search_text_changed("sodium")
+            assert dialogo._pending_search
+
+            dialogo._busy = False
+            dialogo._search_again_if_pending()
+            _esperar(dialogo, qapp, lambda: bool(llamadas))
+            assert llamadas == ["buscar"]
+        finally:
+            dialogo.close()
+
+    def test_instalar_no_pierde_la_busqueda_escrita_mientras_tanto(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        """Al acabar una instalacion se lanza la busqueda que quedo pendiente."""
+        from types import SimpleNamespace
+
+        from serviscraft.core.modrinth import Project
+        from serviscraft.ui.catalog_dialog import CatalogDialog
+        from serviscraft.ui.tasks import TaskRunner
+
+        spec = make_spec(type="FABRIC")
+        dialogo = CatalogDialog(
+            ServerManager(store=store, config=config), TaskRunner(), spec, "mods"
+        )
+        try:
+            proyecto = Project(
+                "p1",
+                "sodium",
+                "Sodium",
+                "Motor de renderizado",
+                100,
+                project_type="mod",
+                server_side="required",
+            )
+            dialogo._fill([proyecto])
+            dialogo.table.selectRow(0)
+
+            capturado: dict[str, object] = {}
+
+            def falso_submit(_desc, _work, **kwargs):
+                capturado.update(kwargs)
+                return object()
+
+            dialogo.runner.submit = falso_submit  # type: ignore[method-assign]
+            dialogo._install_selected()
+            assert dialogo._busy
+
+            # El usuario escribe mientras la instalacion esta en marcha.
+            dialogo._on_search_text_changed("otra cosa")
+            assert dialogo._pending_search
+
+            llamadas: list[str] = []
+            dialogo._search_again_if_pending = lambda: llamadas.append("buscar")
+            finished = capturado["on_finished"]
+            assert callable(finished)
+            finished((SimpleNamespace(version_number="1.0", dependencies=()), "sodium.jar"))
+
+            assert llamadas == ["buscar"]
+            assert dialogo.installed == ["sodium.jar"]
+            assert not dialogo._busy
+        finally:
+            dialogo.close()
+
+
 class TestPreferenciasDeCopias:
     def test_guardar_las_opciones_de_copias(
         self, qapp: QApplication, config: AppConfig
@@ -2558,6 +3323,141 @@ class TestPestanaDeMods:
         finally:
             panel.close()
 
+    def test_el_resumen_cuenta_activos_desactivados_y_tamano(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        from serviscraft.core.models import format_bytes
+
+        spec = make_spec(type=ServerType.FABRIC)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        carpeta = store.data_dir(spec.id) / "mods"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        (carpeta / "create.jar").write_bytes(b"x" * 100)
+        (carpeta / "sodium.jar.desactivado").write_bytes(b"x" * 50)
+
+        panel = self._panel(store, config, spec)
+        try:
+            assert panel.chip_folder.text() == "Carpeta: mods"
+            assert panel.chip_files.text() == "Ficheros: 2"
+            assert panel.chip_active.text() == "Activos: 1"
+            assert panel.chip_disabled.text() == "Desactivados: 1"
+            assert panel.chip_size.text() == f"Ocupan: {format_bytes(150)}"
+            # El origen y el tamano siguen en el tooltip aunque la columna se
+            # aparte en ventanas estrechas.
+            tooltip = panel.table.item(0, 0).toolTip()
+            assert "Origen: personalizado" in tooltip
+            assert f"Tamano: {format_bytes(100)}" in tooltip
+
+            panel.set_server(None, running=False)
+            assert panel.empty.isVisibleTo(panel)
+            assert not panel.summary_row.isVisibleTo(panel)
+            assert not panel.card_installed.isVisibleTo(panel)
+            assert not panel.card_missing.isVisibleTo(panel)
+            assert panel.chip_files.text() == "Ficheros: ?"
+            assert panel.hero.title.full_text() == "Mods y complementos"
+        finally:
+            panel.close()
+
+    def test_las_columnas_secundarias_se_apartan_en_ventanas_estrechas(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        spec = make_spec(type=ServerType.FABRIC)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        carpeta = store.data_dir(spec.id) / "mods"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        (carpeta / "fabric-api-0.100.4+1.21.4.jar").write_bytes(b"PK\x03\x04")
+
+        panel = self._panel(store, config, spec)
+        panel.show()
+        try:
+            panel.resize(480, 700)
+            for _ in range(8):
+                qapp.processEvents()
+            assert panel.width() == 480
+            assert panel.table.isColumnHidden(2), "«Origen» debe apartarse a 480 px"
+            assert panel.table.isColumnHidden(3), "«Tamano» debe apartarse a 480 px"
+            assert panel.missing_table.isColumnHidden(2), "el enlace debe apartarse a 480 px"
+            # El nombre del fichero se queda con el sitio que dejan libre.
+            assert panel.table.columnWidth(0) > 200
+
+            panel.resize(900, 700)
+            for _ in range(8):
+                qapp.processEvents()
+            assert not panel.table.isColumnHidden(2)
+            assert not panel.table.isColumnHidden(3)
+            assert not panel.missing_table.isColumnHidden(2)
+        finally:
+            panel.close()
+
+    def test_sin_ficheros_se_ve_un_aviso_en_vez_de_una_tabla_vacia(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        spec = make_spec(type=ServerType.FABRIC)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+
+        panel = self._panel(store, config, spec)
+        try:
+            assert not panel.table.isVisibleTo(panel)
+            assert panel.installed_empty.isVisibleTo(panel)
+            assert "Todavia no hay mods" in panel.installed_empty.title.text()
+            # El aviso es una seccion propia: la pista de doble clic y la
+            # leyenda no se apilan encima, y una linea los separa de los botones.
+            assert not panel.installed_hint.isVisibleTo(panel)
+            assert not panel.legend.isVisibleTo(panel)
+            assert not panel.status.isVisibleTo(panel)
+            assert panel.installed_separator.isVisibleTo(panel)
+            # La tabla de pendientes tampoco aparece hasta que se analiza.
+            assert not panel.missing_table.isVisibleTo(panel)
+            assert panel.missing_empty.isVisibleTo(panel)
+            assert "Sin mods pendientes" in panel.missing_empty.title.text()
+            assert not panel.missing_hint.isVisibleTo(panel)
+            assert panel.missing_separator.isVisibleTo(panel)
+        finally:
+            panel.close()
+
+    def test_se_pueden_soltar_varios_ficheros_a_la_vez(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig, tmp_path: Path
+    ) -> None:
+        spec = make_spec(type=ServerType.FABRIC)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+        primero = tmp_path / "create.jar"
+        segundo = tmp_path / "jei.jar"
+        primero.write_bytes(b"PK\x03\x04create")
+        segundo.write_bytes(b"PK\x03\x04jei")
+
+        panel = self._panel(store, config, spec)
+        try:
+            panel._add_dropped([str(primero), str(segundo)])
+            carpeta = store.data_dir(spec.id) / "mods"
+            assert (carpeta / "create.jar").is_file()
+            assert (carpeta / "jei.jar").is_file()
+            assert panel.table.rowCount() == 2
+            assert panel.drop_zone.isVisibleTo(panel)
+            assert panel.installed_hint.isVisibleTo(panel)
+            assert not panel.installed_separator.isVisibleTo(panel)
+        finally:
+            panel.close()
+
+    def test_un_servidor_de_pluguins_cambia_los_nombres(
+        self, qapp: QApplication, store: ServerStore, config: AppConfig
+    ) -> None:
+        spec = make_spec(type=ServerType.PAPER)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+
+        panel = self._panel(store, config, spec)
+        try:
+            assert panel.chip_folder.text() == "Carpeta: plugins"
+            assert panel.hero.title.full_text() == "Pluguins de «Servidor test»"
+            assert panel.card_installed.title_label.full_text() == "Pluguins instalados"
+            assert panel.card_missing.title_label.full_text() == "Pluguins que faltan"
+        finally:
+            panel.close()
+
 
 class TestPestanaDeRegistros:
     """La pestana «Registros»: leer, filtrar y seguir un registro."""
@@ -2662,6 +3562,62 @@ class TestPestanaUnirse:
             assert "solo este equipo" in panel.lan_address.text()
             assert not panel.copy_lan_button.isEnabled()
             assert "solo acepta conexiones de este mismo equipo" in panel.scope_note.text()
+        finally:
+            panel.close()
+
+    def test_bedrock_automatico_muestra_la_direccion_y_los_pasos(
+        self, qapp, store, config
+    ) -> None:
+        spec = make_spec(type=ServerType.PAPER, lan=False, bedrock=True)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+
+        panel = self._panel(store, config, spec)
+        try:
+            assert panel.bedrock_address.text() == f"localhost:{spec.bedrock_port}"
+            assert panel.copy_bedrock_button.isEnabled()
+            assert panel.bedrock_check.isChecked()
+            assert "descargan solos" in panel.bedrock_note.text()
+            assert "Solo se puede si usas el plugin" not in panel.bedrock_note.text()
+        finally:
+            panel.close()
+
+    def test_paper_sin_bedrock_ensenia_la_direccion_si_se_instala_el_plugin(
+        self, qapp: QApplication, store, config
+    ) -> None:
+        """Con Geyser puesto a mano no se puede detectar: se muestra igual."""
+        spec = make_spec(type=ServerType.PAPER, lan=False)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+
+        panel = self._panel(store, config, spec)
+        try:
+            assert not panel.bedrock_check.isChecked()
+            assert panel.bedrock_check.isEnabled()
+            assert panel.bedrock_address.text() == f"localhost:{spec.bedrock_port}"
+            assert panel.copy_bedrock_button.isEnabled()
+            nota = panel.bedrock_note.text()
+            assert "Solo se puede si usas el plugin" in nota
+            assert "Plugins" in nota
+            assert "puerto UDP" in nota
+
+            panel.copy_bedrock_button.click()
+            qapp.processEvents()
+            assert QApplication.clipboard().text() == panel.bedrock_address.full_text()
+        finally:
+            panel.close()
+
+    def test_un_servidor_sin_plugins_no_ofrece_bedrock(self, qapp, store, config) -> None:
+        spec = make_spec(type=ServerType.VANILLA, lan=False)
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+
+        panel = self._panel(store, config, spec)
+        try:
+            assert not panel.bedrock_check.isEnabled()
+            assert panel.bedrock_address.text() == "No disponible"
+            assert not panel.copy_bedrock_button.isEnabled()
+            assert "Paper" in panel.bedrock_note.text()
         finally:
             panel.close()
 
@@ -3089,6 +4045,11 @@ class TestIconosDePlataforma:
         window.select_server(java.id)
         assert window.header_platform.bedrock_icon.isHidden()
         assert window.details.platform.bedrock_icon.isHidden()
+        # Paper sin Bedrock automatico: no se afirma que solo entren jugadores
+        # de Java, porque puede tener Geyser instalado a mano.
+        details_java = window.details._labels["bedrock"].text()
+        assert "solo se puede si usas el plugin" in details_java
+        assert "solo entran jugadores de Java" not in details_java
 
         window.select_server(bedrock.id)
         assert not window.details.platform.bedrock_icon.isHidden()

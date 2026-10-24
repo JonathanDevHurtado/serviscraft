@@ -48,7 +48,9 @@ def validate_player_name(name: str) -> str:
     if not _PLAYER_NAME.match(cleaned):
         raise ValidationError(
             "player",
-            "Nombre de jugador no valido: usa solo letras, numeros y guion bajo (maximo 32 caracteres).",
+            "Nombre de jugador no valido: usa solo letras, numeros y guion bajo "
+            "(maximo 32 caracteres). Los jugadores de Bedrock pueden llevar un punto "
+            "delante, por ejemplo .Steve.",
         )
     return cleaned
 

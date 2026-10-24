@@ -11,7 +11,7 @@ import re
 import secrets
 import shutil
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -23,7 +23,7 @@ from .backup import (
     BackupInfo,
     BackupManager,
 )
-from . import appearance, ddns, netinfo
+from . import appearance, ddns, modrinth, netinfo
 from .bedrock import ensure_floodgate_auth
 from .ddns import validate_subdomain, validate_token
 from .diagnostics import StartFailure, diagnose_start_failure
@@ -219,6 +219,43 @@ class ServerManager:
             folder=folder_for(spec),
             modpack=bool(spec.modpack) or spec.type.value == "MODRINTH",
         )
+
+    def install_content(
+        self,
+        server_id: str,
+        selections: Iterable[modrinth.ContentSelection],
+        *,
+        on_progress: Callable[[str], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> list[str]:
+        """Instala en un servidor ya creado el contenido elegido en el asistente.
+
+        El servidor debe existir (aunque este detenido): los ficheros van a su
+        carpeta ``mods`` o ``plugins`` y se anotan para conservar el icono.
+        Devuelve los nombres de los ficheros instalados.
+        """
+        spec = self.store.load(server_id)
+        files = self.files(server_id)
+        inventory = self.mods_inventory(server_id)
+        destination = folder_for(spec)
+        instalados: list[str] = []
+        for selection in selections:
+            if should_cancel is not None and should_cancel():
+                raise ServiscraftError("La instalacion del contenido se cancelo.")
+            if on_progress is not None:
+                on_progress(
+                    f"Instalando «{selection.project.title}» "
+                    f"{selection.release.version_number}..."
+                )
+            path = modrinth.install_release(
+                files,
+                inventory,
+                selection,
+                destination,
+                should_cancel=should_cancel,
+            )
+            instalados.append(path.name)
+        return instalados
 
     def properties(self, server_id: str) -> ServerProperties:
         data_dir = self.store.data_dir(server_id)

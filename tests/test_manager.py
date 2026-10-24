@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from serviscraft.core import modrinth
 from serviscraft.core.appconfig import AppConfig
 from serviscraft.core.backup import ORIGEN_AL_DETENER, ORIGEN_PROGRAMADA, ORIGENES_AUTOMATICOS
 from serviscraft.core.errors import BackupError, ServerStateError, ValidationError
@@ -360,3 +361,60 @@ class TestCopiasAutomaticas:
         assert len(creadas) == 1
         assert creadas[0].path == str(manager_en_marcha.backups.list_backups(dos.id)[0].path)
         assert manager_en_marcha.backups.list_backups(uno.id) == []
+
+
+class TestInstalarContenidoElegido:
+    def test_instala_en_plugins_y_anota_el_proyecto(
+        self,
+        manager: ServerManager,
+        store: ServerStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        spec = make_spec(type="PAPER", version="1.21.4")
+        store.prepare_dirs(spec.id)
+        store.save(spec)
+
+        proyecto = modrinth.Project(
+            "p1", "essentialsx", "EssentialsX", "Comandos", 100, project_type="plugin"
+        )
+        release = modrinth.Release(
+            "p1",
+            "EssentialsX 2.0",
+            "2.0",
+            ("1.21.4",),
+            ("paper",),
+            "https://cdn.modrinth.com/2.0.jar",
+            "essentialsx-2.0.jar",
+        )
+        seleccion = modrinth.ContentSelection(proyecto, release)
+        destinos: list[str] = []
+
+        def instalar(files, inventory, selection, destination, **_kwargs):
+            destinos.append(destination)
+            destino = Path(files.resolve(destination))
+            destino.mkdir(parents=True, exist_ok=True)
+            fichero = destino / selection.release.filename
+            fichero.write_bytes(b"jar")
+            inventory.remember_project(
+                fichero.name,
+                slug=selection.project.slug,
+                title=selection.project.title,
+                icon=selection.project.icon_url,
+            )
+            return fichero
+
+        monkeypatch.setattr(modrinth, "install_release", instalar)
+        avisos: list[str] = []
+
+        instalados = manager.install_content(
+            spec.id, [seleccion], on_progress=avisos.append
+        )
+
+        assert instalados == ["essentialsx-2.0.jar"]
+        assert destinos == ["plugins"]
+        assert (store.data_dir(spec.id) / "plugins" / "essentialsx-2.0.jar").is_file()
+        assert any("EssentialsX" in aviso for aviso in avisos)
+        entradas = manager.mods_inventory(spec.id).list_mods()
+        assert [entrada.filename for entrada in entradas] == ["essentialsx-2.0.jar"]
+        assert entradas[0].title == "EssentialsX"
+        assert entradas[0].custom is True

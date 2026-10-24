@@ -70,8 +70,16 @@ def item_name(item_id: str) -> str:
 
 
 def player_name(player: str) -> str:
-    """Nombre de jugador valido para pedir su skin (sin puntos de Bedrock)."""
+    """Nombre de jugador valido para pedir su skin (sin puntos de Bedrock).
+
+    Floodgate presenta a los jugadores de Bedrock con un punto delante del
+    nombre (``.Steve``). Ese punto sirve para los comandos del servidor, pero no
+    forma parte del nombre con el que se buscan las skins, asi que aqui se quita
+    solo si va al principio. Un punto en medio sigue siendo invalido.
+    """
     name = str(player or "").strip()
+    if name.startswith("."):
+        name = name[1:]
     return name if _PLAYER.match(name) else ""
 
 

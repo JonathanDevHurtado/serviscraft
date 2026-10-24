@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..core import icons as iconos_remotos
 from ..core import modrinth
 from ..core.logging_setup import get_logger
 from ..core.modrinth import ModpackPlan, Project, Release

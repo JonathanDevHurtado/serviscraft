@@ -55,6 +55,14 @@ class TestNombres:
     def test_nombre_de_jugador(self, player: str, valido: bool) -> None:
         assert bool(textures.player_name(player)) is valido
 
+    def test_quita_el_punto_de_los_jugadores_de_bedrock(self) -> None:
+        """Floodgate antepone un punto; la skin se busca por el nombre limpio."""
+        assert textures.player_name(".Steve") == "Steve"
+        assert textures.player_name(".Ana_1") == "Ana_1"
+        assert textures.player_name("..Steve") == ""
+        assert textures.player_name(".a.b") == ""
+        assert textures.skin_cache_path(".Steve") == textures.skin_cache_path("Steve")
+
     def test_las_rutas_no_se_salen_de_la_cache(self, tmp_path: Path) -> None:
         assert textures.item_cache_path("../../x") is None
         assert textures.skin_cache_path("../x") is None
@@ -148,6 +156,26 @@ class TestDescarga:
         assert textures.fetch_skin("ana") == datos
         assert len(urls) == 1
 
+    def test_la_skin_de_un_jugador_de_bedrock_quita_el_punto(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SERVISCRAFT_OFFLINE", raising=False)
+        datos = _png(64, 64)
+        urls: list[str] = []
+
+        def falso(url: str) -> bytes:
+            urls.append(url)
+            return datos
+
+        monkeypatch.setattr(textures, "_download", falso)
+        assert textures.fetch_skin(".Steve") == datos
+        assert urls == ["https://mc-heads.net/skin/Steve"]
+        ruta = textures.skin_cache_path(".Steve")
+        assert ruta is not None and ruta.name == "steve.png" and ruta.is_file()
+        # La misma cabeza sirve para el nombre con punto y sin el.
+        assert textures.fetch_skin("Steve") == datos
+        assert len(urls) == 1
+
     def test_solo_se_aceptan_los_servidores_de_la_lista(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -174,6 +202,21 @@ class TestSkin:
         assert not has_skin(b"")
         assert not head_pixmap(b"", 32).isNull()
         assert not body_pixmap(b"", 96).isNull()
+
+    def test_la_cabeza_desconocida_lleva_un_signo_de_duda(self, qapp) -> None:
+        from serviscraft.ui.mc_icons import icono_jugador_duda
+
+        pixmap = icono_jugador_duda(64)
+        assert not pixmap.isNull()
+        imagen = pixmap.toImage()
+        colores = {
+            imagen.pixelColor(x, y).name()
+            for x in range(imagen.width())
+            for y in range(imagen.height())
+        }
+        # Cara de piedra y signo de interrogacion en blanco hueso.
+        assert "#9aa4ad" in colores
+        assert "#fff3cf" in colores
 
     def test_los_iconos_de_objeto_se_dibujan_sin_red(self, qapp) -> None:
         from serviscraft.ui.mc_icons import item_icon

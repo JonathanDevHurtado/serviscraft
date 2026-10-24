@@ -8,19 +8,26 @@ Ademas analiza el registro del servidor para detectar los mods que el modpack no
 pudo descargar: de cada uno ofrece el enlace a Modrinth, avisa en verde cuando el
 fichero ya esta dentro del servidor y permite copiar el ``.jar`` descargado para
 poder borrar la descarga original.
+
+La pestana se presenta como dos tarjetas de piedra con una cabecera de bloque:
+una para el contenido instalado y otra para lo que falta. Los chips de arriba
+resumen de un vistazo cuantos ficheros hay, cuantos estan activos y cuanto ocupan.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap
+from PySide6.QtCore import QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QScrollArea,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -35,14 +42,32 @@ from ..core.manager import ServerManager
 from ..core.missing_mods import MissingMod, parse_missing_mods
 from ..core.models import ServerSpec, format_bytes
 from .catalog_dialog import CatalogDialog
-from .common import FlowRow, WrappingLabel, hint_label, make_button, plural, polish_table_header
+from .common import (
+    Chip,
+    FlowRow,
+    hint_label,
+    make_button,
+    plural,
+    polish_table_header,
+)
 from .dialogs import ask_text, confirm, show_error, show_info
 from .mc_icons import (
-    SIZE as ICON_SIZE,
+    icono_lista,
     icono_mod,
+    icono_no,
+    icono_pack,
     icono_plugin,
+    icono_si,
     marcar_desactivado,
     pixmap_de_bytes,
+)
+from .mc_widgets import (
+    AccentCard,
+    CenteredEmpty,
+    DropZone,
+    EmptySlot,
+    MinecraftHero,
+    TexturedPage,
 )
 from .tasks import TaskRunner
 
@@ -51,8 +76,45 @@ logger = get_logger("ui.mods")
 #: Color del texto de los mods que ya estan dentro del servidor.
 _VERDE = QColor("#3fa34d")
 
+_AYUDA_GENERAL = (
+    "<b>Que hay en esta pestana</b><br>"
+    "El contenido del servidor, separado en dos tarjetas: lo que ya esta "
+    "instalado y lo que no se pudo descargar.<br><br>"
+    "<b>Lo basico</b><br>"
+    "«Catalogo...» busca en Modrinth y lo instala con un clic. Tambien puedes "
+    "<b>arrastrar un .jar</b> a la zona de arriba, abrirlo con «Desde archivo...» "
+    "o pegar una URL con «Desde enlace...».<br><br>"
+    "Selecciona un fichero de la lista para activarlo o desactivarlo. "
+    "<b>Desactivar no borra nada</b>: el fichero se queda en la carpeta con la "
+    "terminacion «.desactivado» y puedes volver a activarlo cuando quieras.<br><br>"
+    "Si el servidor esta en marcha, detenlo antes de cambiar el contenido."
+)
 
-class ModsPanel(QWidget):
+_AYUDA_INSTALADOS = (
+    "<b>Contenido instalado</b><br>"
+    "Cada fila es un fichero de la carpeta «mods» o «plugins» del servidor. El "
+    "icono de la izquierda es el del proyecto en Modrinth; si no se conoce, se "
+    "usa el simbolo generico de mod o pluguin.<br><br>"
+    "<b>Estado</b><br>"
+    "«activo» significa que el servidor lo cargara al arrancar. «desactivado» "
+    "significa que el fichero sigue en el disco pero no se carga.<br><br>"
+    "<b>Origen</b><br>"
+    "«del modpack» son los que instaló el paquete; «personalizado» los que "
+    "anadiste tu. Si borras uno del modpack, puede volver en el siguiente arranque."
+)
+
+_AYUDA_FALTAN = (
+    "<b>Contenido que falta</b><br>"
+    "El servidor apunta en el registro que parte del contenido no se pudo "
+    "descargar. «Buscar los que faltan» lee ese registro y lo reune aqui.<br><br>"
+    "De cada uno se muestra su enlace de Modrinth. Abrelo, descarga el fichero y "
+    "pulsa «Copiar aqui...» para dejarlo dentro del servidor. Cuando ya esta "
+    "dentro, la fila se pone en verde.<br><br>"
+    "El servidor debe estar detenido para copiar ficheros."
+)
+
+
+class ModsPanel(TexturedPage):
     """Mods instalados y mods que faltan del servidor seleccionado."""
 
     #: Aviso para que la ventana refresque lo que dependa de los ficheros.
@@ -67,18 +129,93 @@ class ModsPanel(QWidget):
         files_provider=None,
     ) -> None:
         super().__init__(parent)
+        self.setObjectName("ModsPanel")
         self.manager = manager
         self.runner = runner
         self._spec: ServerSpec | None = None
         self._running = False
         self._inventory: mods.ModsInventory | None = None
         self._missing: list[MissingMod] = []
+        self._missing_analyzed = False
+        self._missing_base_title = "Mods que faltan"
         #: Permite a las pruebas inyectar un selector de ficheros.
         self._files_dialog = files_provider or QFileDialog.getOpenFileName
 
-        layout = QVBoxLayout(self)
+        # La pestana «Mods» es la mas larga de la ventana (tarjetas, listas y
+        # avisos). Se le da su propia area desplazable y un alto minimo comodo
+        # para que el area exterior de MainWindow no anada una segunda barra:
+        # el contenido crece y se desplaza aqui dentro.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("ModsScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.viewport().setAutoFillBackground(False)
+        outer.addWidget(self.scroll)
+
+        self._page = TexturedPage()
+        self._page.setObjectName("ModsContent")
+        self._page.setAutoFillBackground(False)
+        self.scroll.setWidget(self._page)
+        layout = QVBoxLayout(self._page)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        # Un poco mas de aire entre tarjetas: cada bloque (instalados, pendientes
+        # y estados vacios) se lee como una seccion distinta.
+        layout.setSpacing(14)
+        #: Se guarda para repartir el alto entre las dos tarjetas segun tengan
+        #: contenido: una tarjeta vacia no debe dejar un hueco enorme.
+        self._layout = layout
+
+        # ------------------------------------------------------------ cabecera
+        self.hero = MinecraftHero(
+            "Mods y complementos",
+            "Anade contenido, activa lo que quieras y guarda lo demas sin borrar nada.",
+            pixmap=icono_mod(44),
+            accent="gold",
+            help_title="Mods: como se organiza esta pestana",
+            help_text=_AYUDA_GENERAL,
+        )
+        layout.addWidget(self.hero)
+
+        # -------------------------------------------------------------- resumen
+        self.summary_row = FlowRow(spacing=8)
+        self.chip_folder = Chip("Carpeta: ?", pixmap=icono_pack(14))
+        self.chip_files = Chip("Ficheros: ?", pixmap=icono_mod(14))
+        self.chip_active = Chip("Activos: ?", tone="ok")
+        self.chip_disabled = Chip("Desactivados: ?")
+        self.chip_size = Chip("Ocupan: ?")
+        self.chip_running = Chip(
+            "Servidor en marcha: detenlo para cambiar",
+            tone="warn",
+            tooltip="Los cambios de mods se aplican al reiniciar el servidor",
+        )
+        for chip in (
+            self.chip_folder,
+            self.chip_files,
+            self.chip_active,
+            self.chip_disabled,
+            self.chip_size,
+            self.chip_running,
+        ):
+            self.summary_row.add(chip)
+        layout.addWidget(self.summary_row)
+
+        # ------------------------------------------------------ contenido actual
+        self.card_installed = AccentCard(
+            "Contenido instalado",
+            pixmap=icono_pack(20),
+            help_title="Mods instalados: activar, desactivar y eliminar",
+            help_text=_AYUDA_INSTALADOS,
+            accent="gold",
+        )
+        self.card_installed.body().setSpacing(9)
+        self.installed_hint = hint_label(
+            "Arrastra un .jar, abre el Catalogo o usa un enlace. Doble clic en "
+            "un fichero para activarlo o desactivarlo: desactivar no borra nada."
+        )
+        self.card_installed.body().addWidget(self.installed_hint)
 
         self.actions_row = FlowRow(spacing=8)
         self.refresh_button = make_button(
@@ -87,7 +224,6 @@ class ModsPanel(QWidget):
             tooltip="Volver a leer la carpeta de mods del servidor",
         )
         self.refresh_button.clicked.connect(self.refresh)
-        self.actions_row.add(self.refresh_button)
 
         self.catalog_button = make_button(
             "Catalogo...",
@@ -114,6 +250,8 @@ class ModsPanel(QWidget):
         self.url_button.clicked.connect(self._add_url)
         self.actions_row.add(self.url_button)
 
+        self.actions_row.add(self.refresh_button)
+
         self.toggle_button = make_button(
             "Activar",
             icon_names=("object-select",),
@@ -130,16 +268,40 @@ class ModsPanel(QWidget):
         )
         self.delete_button.clicked.connect(self._delete_selected)
         self.actions_row.add(self.delete_button)
-        layout.addWidget(self.actions_row)
+        self.card_installed.body().addWidget(self.actions_row)
+
+        # Arrastrar y soltar: el gesto mas rapido para instalar un .jar que se
+        # acaba de descargar. La zona tambien abre el selector al pulsarla.
+        self.drop_zone = DropZone(
+            "Arrastra aqui tus .jar",
+            "Suelta uno o varios ficheros, o pulsa para elegirlos. Tambien vale .zip y .mrpack.",
+            pixmap=icono_mod(42),
+        )
+        self.drop_zone.clicked.connect(self._add_local)
+        self.drop_zone.files_dropped.connect(self._add_dropped)
+        self.card_installed.body().addWidget(self.drop_zone)
 
         # Leyenda con los iconos de verdad: la lista se entiende de un vistazo.
         self.legend = FlowRow(spacing=14)
-        layout.addWidget(self.legend)
+        self.card_installed.body().addWidget(self.legend)
 
         self.status = hint_label("")
-        layout.addWidget(self.status)
+        self.card_installed.body().addWidget(self.status)
+
+        # El estado vacio va en su propio bloque, separado de las herramientas
+        # con una linea: no parece un aviso pegado a los botones.
+        self.installed_separator = self._separador("ModsInstalledSeparator")
+        self.card_installed.body().addWidget(self.installed_separator)
+        self.installed_empty = EmptySlot(
+            "Todavia no hay contenido",
+            "Arrastra un .jar a la zona de arriba o abre el Catalogo para instalar "
+            "un mod de Modrinth.",
+            pixmap=icono_mod(46),
+        )
+        self.card_installed.body().addWidget(self.installed_empty)
 
         self.table = QTableWidget(0, 4)
+        self.table.setObjectName("ModsTable")
         self.table.setHorizontalHeaderLabels(["Fichero", "Estado", "Origen", "Tamano"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in (1, 2, 3):
@@ -147,7 +309,8 @@ class ModsPanel(QWidget):
         self.table.verticalHeader().setVisible(False)
         # Cada fila lleva el icono del proyecto (o el del tipo de contenido), asi
         # que las filas son un poco mas altas que el texto.
-        self.table.verticalHeader().setDefaultSectionSize(ICON_SIZE + 8)
+        self.table.setIconSize(QSize(24, 24))
+        self.table.verticalHeader().setDefaultSectionSize(34)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -155,26 +318,32 @@ class ModsPanel(QWidget):
         self.table.itemSelectionChanged.connect(self._update_actions)
         self.table.doubleClicked.connect(lambda _index: self._toggle_selected())
         polish_table_header(self.table)
-        self.table.setMinimumHeight(160)
-        layout.addWidget(self.table, 1)
+        self.table.setMinimumHeight(170)
+        self.card_installed.body().addWidget(self.table, 1)
+        layout.addWidget(self.card_installed, 1)
 
         # ------------------------------------------------------- mods que faltan
-        self.missing_title = QLabel("Mods que faltan")
-        self.missing_title.setObjectName("SectionTitle")
-        layout.addWidget(self.missing_title)
-
-        self.missing_hint = hint_label(
-            "Analiza el registro del servidor para ver que mods no pudo descargar el "
-            "modpack. De cada uno se muestra su enlace de Modrinth y se avisa en verde "
-            "cuando el fichero ya esta dentro del servidor."
+        self.card_missing = AccentCard(
+            "Mods que faltan",
+            pixmap=icono_lista(20),
+            help_title="Contenido que el servidor no pudo descargar",
+            help_text=_AYUDA_FALTAN,
+            accent="blue",
         )
-        layout.addWidget(self.missing_hint)
+        self.missing_title = self.card_missing.title_label
+        self.card_missing.body().setSpacing(9)
+        self.missing_hint = hint_label(
+            "Analiza el registro del servidor para ver que contenido no se pudo "
+            "descargar. De cada uno se muestra su enlace de Modrinth y se avisa en "
+            "verde cuando el fichero ya esta dentro del servidor."
+        )
+        self.card_missing.body().addWidget(self.missing_hint)
 
         self.missing_actions = FlowRow(spacing=8)
         self.analyze_button = make_button(
             "Buscar los que faltan",
             icon_names=("system-search",),
-            tooltip="Lee el registro del servidor y busca los mods que el modpack no pudo descargar",
+            tooltip="Lee el registro del servidor y busca el contenido que no se pudo descargar",
         )
         self.analyze_button.clicked.connect(self.analyze_logs)
         self.missing_actions.add(self.analyze_button)
@@ -195,31 +364,58 @@ class ModsPanel(QWidget):
         )
         self.copy_button.clicked.connect(self._copy_missing_file)
         self.missing_actions.add(self.copy_button)
-        layout.addWidget(self.missing_actions)
+        self.card_missing.body().addWidget(self.missing_actions)
+
+        self.missing_separator = self._separador("ModsMissingSeparator")
+        self.card_missing.body().addWidget(self.missing_separator)
+        self.missing_empty = EmptySlot(
+            "Sin mods pendientes por ahora",
+            "Pulsa «Buscar los que faltan» y Serviscraft revisara el registro del "
+            "servidor para ver si no se pudo descargar algo.",
+            pixmap=icono_si(46),
+        )
+        self.card_missing.body().addWidget(self.missing_empty)
 
         self.missing_table = QTableWidget(0, 3)
+        self.missing_table.setObjectName("MissingModsTable")
         self.missing_table.setHorizontalHeaderLabels(["Mod", "Estado", "Enlace"])
         self.missing_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.missing_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.missing_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.missing_table.verticalHeader().setVisible(False)
+        self.missing_table.setIconSize(QSize(20, 20))
+        self.missing_table.verticalHeader().setDefaultSectionSize(30)
         self.missing_table.setAlternatingRowColors(True)
         self.missing_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.missing_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.missing_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.missing_table.setMaximumHeight(150)
-        self.missing_table.setMinimumHeight(80)
+        self.missing_table.setMaximumHeight(170)
+        self.missing_table.setMinimumHeight(90)
         self.missing_table.itemSelectionChanged.connect(self._update_missing_actions)
         self.missing_table.doubleClicked.connect(lambda _index: self._open_missing_link())
         polish_table_header(self.missing_table)
-        layout.addWidget(self.missing_table, 1)
+        self.card_missing.body().addWidget(self.missing_table, 1)
+        layout.addWidget(self.card_missing, 1)
 
-        self.empty = WrappingLabel("Selecciona un servidor para ver sus mods.")
-        self.empty.setObjectName("EmptyState")
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.empty)
+        self.empty = CenteredEmpty(
+            "Elige un servidor",
+            "Selecciona uno en la lista de la izquierda para ver sus mods, "
+            "arrastrar ficheros nuevos y activar o desactivar lo que ya tiene.",
+            pixmap=icono_pack(64),
+        )
+        layout.addWidget(self.empty, 1)
 
         self.set_server(None, running=False)
+
+    @staticmethod
+    def _separador(nombre: str) -> QFrame:
+        """Linea fina que separa el contenido de un estado vacio."""
+        linea = QFrame()
+        linea.setObjectName(nombre)
+        linea.setFixedHeight(1)
+        linea.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        linea.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        return linea
 
     def _leyenda(self, icono: QPixmap, texto: str) -> QWidget:
         """Icono + palabra: explica la lista de un vistazo (tambien para niños)."""
@@ -244,6 +440,52 @@ class ModsPanel(QWidget):
             self.legend.add(self._leyenda(icono_mod(), "mod"))
         self.legend.add(self._leyenda(marcar_desactivado(icono_mod()), "desactivado (no se borra)"))
 
+    def _poner_icono_hero(self, pixmap: QPixmap) -> None:
+        if pixmap is None or pixmap.isNull():
+            return
+        self.hero.icon_label.setPixmap(
+            pixmap.scaled(
+                40, 40, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+            )
+        )
+        self.hero.icon_label.setVisible(True)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - API de Qt
+        """Alto minimo comodo: el area exterior no necesita otra barra.
+
+        La barra vertical vive dentro de esta pestana. Si el panel pidiera todo
+        el alto de sus tarjetas, MainWindow anadiria una segunda barra exterior
+        y el contenido se desplazaria dos veces. Con 430 px la ventana normal
+        usa solo la barra interior; en ventanas muy bajas sigue habiendo barra
+        exterior para llegar al panel completo.
+        """
+        hint = super().minimumSizeHint()
+        return QSize(hint.width(), max(hint.height(), 430))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        """En ventanas estrechas deja sitio al nombre del fichero.
+
+        «Estado», «Origen» y «Tamano» ocupaban tanto que los nombres se
+        quedaban en «create-...». Por debajo de 620 px se ocultan las columnas
+        secundarias (el dato sigue en el tooltip de la fila) y la primera
+        columna se queda con el ancho. Al ensanchar vuelven a aparecer.
+        """
+        super().resizeEvent(event)
+        # Qt puede enviar el primer resize mientras se construye el panel; las
+        # tablas de «faltan» todavia no existen en ese momento.
+        if not hasattr(self, "missing_table"):
+            return
+        estrecho = self.width() < 620
+        self.table.setColumnHidden(2, estrecho)
+        self.table.setColumnHidden(3, estrecho)
+        self.missing_table.setColumnHidden(2, estrecho)
+        self.missing_table.horizontalHeader().setSectionResizeMode(
+            0,
+            QHeaderView.ResizeMode.Stretch
+            if estrecho
+            else QHeaderView.ResizeMode.ResizeToContents,
+        )
+
     # ================================================================= API
     def set_server(self, spec: ServerSpec | None, *, running: bool = False) -> None:
         cambio = spec is None or self._spec is None or self._spec.id != spec.id
@@ -252,6 +494,7 @@ class ModsPanel(QWidget):
             self.table.setRowCount(0)
             self.missing_table.setRowCount(0)
             self._missing = []
+            self._missing_analyzed = False
             self.status.clear()
         self._spec = spec
         self._running = running
@@ -266,21 +509,43 @@ class ModsPanel(QWidget):
             )
         has_server = spec is not None
         if has_server:
-            self._rellenar_leyenda(mods.folder_for(spec) == "plugins")
-        for widget in (
-            self.actions_row,
-            self.legend,
-            self.status,
-            self.table,
-            self.missing_title,
-            self.missing_hint,
-            self.missing_actions,
-            self.missing_table,
-        ):
-            widget.setVisible(has_server)
+            es_pluguins = mods.folder_for(spec) == "plugins"
+            self._rellenar_leyenda(es_pluguins)
+            self._poner_icono_hero(icono_plugin(44) if es_pluguins else icono_mod(44))
+            nombre_carpeta = "plugins" if es_pluguins else "mods"
+            tipo = "Pluguins" if es_pluguins else "Mods"
+            self.hero.set_title(f"{tipo} de «{spec.name}»")
+            self.hero.set_subtitle(
+                f"Contenido de la carpeta «{nombre_carpeta}»: anade, activa o elimina sin miedo."
+            )
+            self.card_installed.set_title(f"{tipo} instalados")
+            self._missing_base_title = f"{tipo} que faltan"
+            self.card_missing.set_title(self._missing_base_title)
+            self.chip_folder.set_text(f"Carpeta: {nombre_carpeta}")
+            self.chip_folder.setToolTip(f"El servidor guarda el contenido en la carpeta «{nombre_carpeta}»")
+        else:
+            self.hero.set_title("Mods y complementos")
+            self.hero.set_subtitle("Selecciona un servidor a la izquierda para ver su contenido.")
+            self._missing_base_title = "Mods que faltan"
+            self.card_missing.set_title(self._missing_base_title)
+            self._reset_resumen()
+        self.hero.setVisible(True)
+        self.summary_row.setVisible(has_server)
+        self.card_installed.setVisible(has_server)
+        self.card_missing.setVisible(has_server)
         self.empty.setVisible(not has_server)
         if has_server and cambio_estado:
             self.refresh()
+
+    def _reset_resumen(self) -> None:
+        self.chip_folder.set_text("Carpeta: ?")
+        self.chip_files.set_text("Ficheros: ?")
+        self.chip_active.set_text("Activos: ?")
+        self.chip_active.set_tone("ok")
+        self.chip_disabled.set_text("Desactivados: ?")
+        self.chip_disabled.set_tone("")
+        self.chip_size.set_text("Ocupan: ?")
+        self.chip_running.setVisible(False)
 
     def refresh(self) -> None:
         """Vuelve a leer la carpeta de mods del servidor."""
@@ -302,15 +567,31 @@ class ModsPanel(QWidget):
             detalle = entrada.title or entrada.base_name
             nombre.setToolTip(
                 f"{entrada.filename}\n{detalle}\n"
-                f"{'Activo' if entrada.enabled else 'Desactivado (el fichero sigue en el disco)'}"
+                f"{'Activo' if entrada.enabled else 'Desactivado (el fichero sigue en el disco)'}\n"
+                f"Origen: {entrada.origin_label}. Tamano: {entrada.size_label}."
             )
             if not entrada.enabled:
                 nombre.setForeground(Qt.GlobalColor.gray)
             self.table.setItem(row, 0, nombre)
-            self.table.setItem(row, 1, QTableWidgetItem("activo" if entrada.enabled else "desactivado"))
-            self.table.setItem(row, 2, QTableWidgetItem(entrada.origin_label))
+            estado = QTableWidgetItem(
+                QIcon(icono_si(16) if entrada.enabled else icono_no(16)),
+                "activo" if entrada.enabled else "desactivado",
+            )
+            estado.setForeground(QColor("#2E7D3A") if entrada.enabled else QColor("#A87B24"))
+            fuente = estado.font()
+            fuente.setBold(True)
+            estado.setFont(fuente)
+            self.table.setItem(row, 1, estado)
+            origen = QTableWidgetItem(entrada.origin_label)
+            origen.setForeground(
+                self.palette().color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text)
+            )
+            self.table.setItem(row, 2, origen)
             tamano = QTableWidgetItem(entrada.size_label)
             tamano.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tamano.setForeground(
+                self.palette().color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text)
+            )
             self.table.setItem(row, 3, tamano)
         self._update_status(entradas)
         self._update_actions()
@@ -323,12 +604,13 @@ class ModsPanel(QWidget):
         icono en la lista, y los que no se han instalado desde el catalogo llevan
         el simbolo generico (pieza de puzle para mods, enchufe para pluguins).
         """
-        generico = icono_plugin() if es_pluguins else icono_mod()
+        tamano = 24
+        generico = icono_plugin(tamano) if es_pluguins else icono_mod(tamano)
         icono = generico
         if entrada.icon_url:
             datos = iconos_remotos.cached_bytes(entrada.icon_url)
             if datos:
-                real = pixmap_de_bytes(datos, ICON_SIZE)
+                real = pixmap_de_bytes(datos, tamano)
                 if not real.isNull():
                     icono = real
         if not entrada.enabled:
@@ -358,6 +640,58 @@ class ModsPanel(QWidget):
             )
         self.status.setText(" ".join(partes))
 
+        # Resumen de un vistazo: los mismos numeros, en chips faciles de leer.
+        self.chip_files.set_text(f"Ficheros: {len(entradas)}")
+        self.chip_files.setToolTip(
+            f"{plural(len(entradas), 'fichero', 'ficheros')} en la carpeta «{carpeta}»"
+        )
+        self.chip_active.set_text(f"Activos: {activos}")
+        self.chip_active.set_tone("ok" if activos else "")
+        self.chip_active.setToolTip(f"{plural(activos, 'fichero activo', 'ficheros activos')}")
+        self.chip_disabled.set_text(f"Desactivados: {desactivados}")
+        self.chip_disabled.set_tone("warn" if desactivados else "")
+        self.chip_disabled.setToolTip(
+            f"{plural(desactivados, 'fichero desactivado', 'ficheros desactivados')}; "
+            "los ficheros siguen en el disco"
+        )
+        self.chip_size.set_text(f"Ocupan: {format_bytes(total)}")
+        self.chip_size.setToolTip(f"Espacio total que ocupa el contenido: {format_bytes(total)}")
+        self.chip_running.setVisible(self._running)
+
+        # Una tabla sin filas parece un fallo de carga: se cambia por un aviso
+        # con un objeto y una pista de que hacer.
+        es_pluguins = mods.folder_for(self._spec) == "plugins"
+        hay_contenido = bool(entradas)
+        self.table.setVisible(hay_contenido)
+        # Con la carpeta vacia sobran la leyenda, el resumen duplicado y la
+        # pista de doble clic: el estado vacio ya dice que hacer. Asi el aviso
+        # queda como una seccion propia y no como un apano bajo los botones.
+        self.installed_hint.setVisible(hay_contenido)
+        self.legend.setVisible(hay_contenido)
+        self.status.setVisible(hay_contenido)
+        self.installed_separator.setVisible(not hay_contenido)
+        self.installed_empty.setVisible(not hay_contenido)
+        self.installed_empty.set_texts(
+            "Todavia no hay pluguins" if es_pluguins else "Todavia no hay mods",
+            "Arrastra un .jar a la zona de arriba o abre el Catalogo para instalar "
+            + ("un pluguin de Modrinth." if es_pluguins else "un mod de Modrinth."),
+        )
+        self.installed_empty.set_pixmap(icono_plugin(46) if es_pluguins else icono_mod(46))
+        self._ajustar_reparto()
+
+    def _ajustar_reparto(self) -> None:
+        """Da el alto sobrante solo a las tarjetas que tienen lista.
+
+        Sin esto, la tarjeta «Mods que faltan» vacia se quedaba con media
+        ventana y dejaba una tabla en blanco enorme.
+        """
+        self._layout.setStretchFactor(
+            self.card_installed, 1 if self.table.rowCount() else 0
+        )
+        self._layout.setStretchFactor(
+            self.card_missing, 1 if self.missing_table.rowCount() else 0
+        )
+
     # =============================================================== acciones
     def _selected_filename(self) -> str | None:
         row = self.table.currentRow()
@@ -377,6 +711,17 @@ class ModsPanel(QWidget):
         self.local_button.setEnabled(not self._running)
         self.url_button.setEnabled(not self._running)
         self.refresh_button.setEnabled(True)
+        self.drop_zone.setEnabled(not self._running)
+        if self._running:
+            self.drop_zone.set_texts(
+                "El servidor esta en marcha",
+                "Detenlo para arrastrar, elegir o quitar contenido.",
+            )
+        else:
+            self.drop_zone.set_texts(
+                "Arrastra aqui tus .jar",
+                "Suelta uno o varios ficheros, o pulsa para elegirlos. Tambien vale .zip y .mrpack.",
+            )
         # El boton dice lo que va a hacer con el fichero elegido: mas claro que
         # un «Activar o desactivar» que obliga a pensar.
         if not hay_seleccion:
@@ -434,6 +779,44 @@ class ModsPanel(QWidget):
         self.refresh()
         self.changed.emit()
 
+    def _add_dropped(self, rutas: list[str]) -> None:
+        """Copia los ficheros soltados sobre la zona de arrastre."""
+        if self._inventory is None or not rutas:
+            return
+        if self._running:
+            show_info(
+                self,
+                "El servidor esta en marcha",
+                "Deten el servidor antes de anadir mods o pluguins.",
+            )
+            return
+        inventario = self._inventory
+        anadidos: list[str] = []
+        errores: list[str] = []
+        for ruta in rutas:
+            try:
+                destino = inventario.add_file(Path(ruta))
+            except ServiscraftError as exc:
+                errores.append(f"{Path(ruta).name}: {exc}")
+                continue
+            anadidos.append(destino.name)
+        self.refresh()
+        self.changed.emit()
+        if anadidos:
+            lista = "\n".join(f"  • {nombre}" for nombre in anadidos)
+            show_info(
+                self,
+                "Contenido anadido",
+                f"Se han copiado {plural(len(anadidos), 'fichero', 'ficheros')}:\n\n"
+                f"{lista}\n\nReinicia el servidor para aplicarlo.",
+            )
+        if errores:
+            show_error(
+                self,
+                "No se pudieron copiar todos los ficheros",
+                "\n".join(errores),
+            )
+
     def _add_url(self) -> None:
         if self._inventory is None:
             return
@@ -462,12 +845,15 @@ class ModsPanel(QWidget):
             return destino.name
 
         def done(nombre: str) -> None:
+            if self._spec is None or self._spec.id != spec.id:
+                return
             self.status.setText(f"Anadido «{nombre}». Reinicia el servidor para aplicarlo.")
             self.refresh()
             self.changed.emit()
 
         def failed(message: str, details: str) -> None:
-            show_error(self, "No se pudo descargar el mod", message, details)
+            if self._spec is not None and self._spec.id == spec.id:
+                show_error(self, "No se pudo descargar el mod", message, details)
 
         self.runner.submit("Descargando mod", work, on_finished=done, on_failed=failed)
 
@@ -491,7 +877,11 @@ class ModsPanel(QWidget):
         nombre = self._selected_filename()
         if nombre is None or self._inventory is None or self._running:
             return
-        entradas = {entrada.filename: entrada for entrada in self._inventory.list_mods()}
+        try:
+            entradas = {entrada.filename: entrada for entrada in self._inventory.list_mods()}
+        except ServiscraftError as exc:
+            show_error(self, "No se pudieron leer los mods", str(exc))
+            return
         entrada = entradas.get(nombre)
         aviso = ""
         if entrada is not None and not entrada.custom and self._inventory.modpack:
@@ -538,23 +928,32 @@ class ModsPanel(QWidget):
             return "\n".join(parte for parte in partes if parte)
 
         def done(texto: str) -> None:
+            # Si se cambio de servidor mientras se leia el registro, el
+            # resultado pertenece al anterior y no debe pisar el nuevo.
+            if self._spec is None or self._spec.id != spec.id:
+                return
             self._missing = parse_missing_mods(texto)
+            self._missing_analyzed = True
             self._update_missing_rows()
+            es_pluguins = mods.folder_for(spec) == "plugins"
+            singular = "pluguin" if es_pluguins else "mod"
+            plural_ = "pluguins" if es_pluguins else "mods"
             if self._missing:
                 faltan = sum(1 for mod in self._missing if not self._esta_instalado(mod))
                 self.status.setText(
-                    f"El registro menciona {plural(len(self._missing), 'mod', 'mods')}: "
+                    f"El registro menciona {plural(len(self._missing), singular, plural_)}: "
                     f"{faltan} por conseguir. Abre el enlace, descarga el fichero y usa "
                     "«Copiar el .jar aqui»."
                 )
             else:
                 self.status.setText(
-                    "El registro no menciona mods que falten. Si el servidor no arranca, "
-                    "revisa el registro completo en la pestana «Registros»."
+                    f"El registro no menciona {plural_} que falten. Si el servidor no "
+                    "arranca, revisa el registro completo en la pestana «Registros»."
                 )
 
         def failed(message: str, details: str) -> None:
-            self.status.setText(f"No se pudo analizar el registro: {message}")
+            if self._spec is not None and self._spec.id == spec.id:
+                self.status.setText(f"No se pudo analizar el registro: {message}")
 
         self.runner.submit(
             "Analizando el registro",
@@ -567,7 +966,11 @@ class ModsPanel(QWidget):
     def _esta_instalado(self, mod: MissingMod) -> bool:
         if self._inventory is None:
             return False
-        return mods.find_installed(mod.name, self._inventory.installed_names()) is not None
+        try:
+            instalados = self._inventory.installed_names()
+        except ServiscraftError:  # pragma: no cover - carpeta ilegible
+            return False
+        return mods.find_installed(mod.name, instalados) is not None
 
     def _update_missing_rows(self) -> None:
         self.missing_table.setRowCount(0)
@@ -575,22 +978,61 @@ class ModsPanel(QWidget):
             row = self.missing_table.rowCount()
             self.missing_table.insertRow(row)
             instalado = self._esta_instalado(mod)
-            nombre = QTableWidgetItem(mod.name)
+            nombre = QTableWidgetItem(
+                QIcon(icono_si(16) if instalado else icono_no(16)), mod.name
+            )
             nombre.setData(Qt.ItemDataRole.UserRole, mod)
-            nombre.setToolTip(mod.detail or mod.name)
+            nombre.setToolTip(
+                f"{mod.detail or mod.name}\nEnlace: {mod.link}"
+            )
             if instalado:
                 nombre.setForeground(_VERDE)
             self.missing_table.setItem(row, 0, nombre)
 
             estado = QTableWidgetItem("ya esta en el servidor" if instalado else "falta")
-            if instalado:
-                estado.setForeground(_VERDE)
+            estado.setForeground(_VERDE if instalado else QColor("#A87B24"))
+            fuente = estado.font()
+            fuente.setBold(True)
+            estado.setFont(fuente)
             self.missing_table.setItem(row, 1, estado)
 
             enlace = QTableWidgetItem(mod.link)
             enlace.setToolTip(f"Abrir en el navegador:\n{mod.link}")
+            enlace.setForeground(
+                self.palette().color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text)
+            )
             self.missing_table.setItem(row, 2, enlace)
+        if self._missing:
+            self.card_missing.set_title(
+                f"{self._missing_base_title} ({len(self._missing)})"
+            )
+        else:
+            self.card_missing.set_title(self._missing_base_title)
+
+        # Sin resultados no se enseña una tabla vacia: se explica que hacer.
+        hay_pendientes = bool(self._missing)
+        self.missing_table.setVisible(hay_pendientes)
+        self.missing_hint.setVisible(hay_pendientes)
+        self.missing_separator.setVisible(not hay_pendientes)
+        self.missing_empty.setVisible(not hay_pendientes)
+        es_pluguins = self._spec is not None and mods.folder_for(self._spec) == "plugins"
+        sustantivo = "pluguins" if es_pluguins else "mods"
+        if self._missing_analyzed:
+            self.missing_empty.set_texts(
+                "Todo en orden",
+                f"El registro no menciona {sustantivo} que falten. Si el servidor no "
+                "arranca, revisa el registro completo en la pestana «Registros».",
+            )
+            self.missing_empty.set_pixmap(icono_si(46))
+        else:
+            self.missing_empty.set_texts(
+                f"Sin {sustantivo} pendientes por ahora",
+                "Pulsa «Buscar los que faltan» y Serviscraft revisara el registro del "
+                "servidor para ver si no se pudo descargar algo.",
+            )
+            self.missing_empty.set_pixmap(icono_lista(46))
         self._update_missing_actions()
+        self._ajustar_reparto()
 
     def _selected_missing(self) -> MissingMod | None:
         row = self.missing_table.currentRow()

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLayoutItem,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSlider,
     QSpinBox,
@@ -1048,8 +1049,10 @@ class SectionCard(QFrame):
 
         self.title_label = ElidedLabel(title)
         self.title_label.setObjectName("SectionTitle")
+        # El titulo se queda con todo el sitio libre: un ``addStretch`` extra
+        # le daba solo la mitad y recortaba titulos que si cabian (por ejemplo
+        # «Como se ve en Minecraft» en una ventana de 480 px).
         head.addWidget(self.title_label, 1)
-        head.addStretch(1)
         self.help_button = HelpButton(help_title or title, help_text, self)
         self.help_button.set_help(help_title or title, help_text, pixmap=pixmap)
         head.addWidget(self.help_button)
@@ -1134,3 +1137,69 @@ class Chip(QFrame):
         estilo = self.style()
         estilo.unpolish(self)
         estilo.polish(self)
+
+
+class PaginaDesplazable(QScrollArea):
+    """Panel con barra vertical cuando el contenido no cabe a lo alto.
+
+    Con el mosaico automatico la ventana puede quedarse con menos alto del que
+    necesita una pestana (la de «Mods» es la mas larga). Si no hay barra, Qt
+    comprime los paneles por debajo de su tamano minimo y los botones de una
+    fila se dibujan encima del texto siguiente. Lo mismo pasa en el selector de
+    contenido, donde el catalogo crece al enseñar todas las versiones.
+
+    El ancho lo manda siempre el contenedor (como si no hubiera area): los
+    paneles ya saben envolver sus barras y recortar sus textos con puntos
+    suspensivos. El alto es el minimo que pide el panel a ese ancho (contando
+    las barras ya envueltas) o el del contenedor si sobra sitio. El diseno se
+    activa a mano para que funcione tambien cuando la ventana esta oculta (en
+    las pruebas).
+    """
+
+    def __init__(self, panel: QWidget) -> None:
+        super().__init__()
+        self.setWidget(panel)
+        self.setWidgetResizable(False)  # el tamano lo pone `_acomodar`
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.viewport().setAutoFillBackground(False)
+        panel.setAutoFillBackground(False)
+        self._acomodando = False
+        panel.installEventFilter(self)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        super().resizeEvent(event)
+        self._acomodar()
+
+    def eventFilter(self, objeto, evento):  # noqa: N802 - API de Qt
+        if objeto is self.widget() and evento.type() in (
+            QEvent.Type.LayoutRequest,
+            QEvent.Type.Resize,
+        ):
+            self._acomodar()
+        return super().eventFilter(objeto, evento)
+
+    def _acomodar(self) -> None:
+        panel = self.widget()
+        if panel is None or self._acomodando:
+            return
+        self._acomodando = True
+        try:
+            ancho = max(1, self.viewport().width())
+            alto_vista = max(1, self.viewport().height())
+            diseno = panel.layout()
+            # Primero se fija el ancho: las barras de botones (FlowRow) recalculan
+            # su alto minimo al envolver. Despues se pide el alto minimo del
+            # panel a ese ancho y se estira hasta la ventana si hay sitio.
+            if panel.width() != ancho:
+                panel.setGeometry(0, 0, ancho, panel.height())
+            if diseno is not None:
+                diseno.activate()
+            necesario = max(panel.minimumSizeHint().height(), 1)
+            alto = max(alto_vista, necesario)
+            if panel.width() != ancho or panel.height() != alto:
+                panel.setGeometry(0, 0, ancho, alto)
+            if diseno is not None:
+                diseno.activate()
+        finally:
+            self._acomodando = False

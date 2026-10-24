@@ -5,7 +5,9 @@ Cuatro secciones, en el orden en que se necesitan:
 1. **Java** (PC, Mac, Linux): la direccion exacta que hay que escribir en
    Minecraft, con boton para copiarla y los pasos numerados.
 2. **Bedrock** (movil, tablet, consola): se activa con Geyser y Floodgate, que
-   descarga la propia imagen, y se publica el puerto UDP correspondiente.
+   descarga la propia imagen, y se publica el puerto UDP correspondiente. La
+   direccion se muestra tambien cuando los plugins se instalan a mano: en ese
+   caso se avisa de que solo funciona si el plugin esta puesto.
 3. **Amigos de fuera de casa**: la IP publica, el puerto que hay que abrir en el
    router y las alternativas si el operador no deja.
 4. **Cuentas**: si se exigen cuentas premium (``online-mode``) o se acepta
@@ -94,11 +96,16 @@ _AYUDA_BEDROCK = (
     "Minecraft <b>Bedrock</b> es el de movil (Android y iPhone), tablet, consola "
     "y la tienda de Microsoft. Habla un idioma distinto al de Java, asi que para "
     "que entren hace falta un traductor: los pluguins <b>Geyser</b> y "
-    "<b>Floodgate</b> (Serviscraft los descarga solo, no hay que buscar nada)."
-    "<br><br>Al marcar la casilla se abre tambien el <b>puerto UDP</b> (19132) "
-    "ademas del de Java. El mundo es el mismo para todos: los de movil y los de "
-    "PC se ven entre ellos.<br><br>Solo funciona en servidores de tipo Paper, que "
-    "es el unico que admite pluguins."
+    "<b>Floodgate</b>."
+    "<br><br>Puedes instalarlos de dos formas:<br>"
+    "· Marca la casilla y Serviscraft los descarga solo y abre el <b>puerto UDP</b> "
+    "(19132).<br>"
+    "· Instalalos tu mismo en la pestana <b>Plugins</b>. En ese caso la direccion "
+    "Bedrock <b>solo se puede si usas el plugin</b>, y el puerto UDP tiene que "
+    "estar abierto."
+    "<br><br>El mundo es el mismo para todos: los de movil y los de PC se ven entre "
+    "ellos. Solo funciona en servidores de tipo Paper, que es el unico que admite "
+    "pluguins."
 )
 
 _AYUDA_INTERNET = (
@@ -839,27 +846,33 @@ class JoinPanel(QWidget):
             self.bedrock_check.setToolTip(
                 "Instala los pluguins Geyser y Floodgate, y publica el puerto UDP de Bedrock."
             )
-        host = self.manager.host_lan_ip()
+        host = self.manager.host_lan_ip() if spec.lan else "localhost"
+        # La direccion se muestra siempre en servidores con pluguins: aunque la
+        # casilla este apagada, el usuario puede haber instalado Geyser y
+        # Floodgate a mano desde la pestana Plugins. Serviscraft no puede
+        # detectarlo, asi que se avisa de que solo funciona con el plugin.
+        self.bedrock_address.setText(f"{host}:{spec.bedrock_port}")
+        self.copy_bedrock_button.setEnabled(True)
+        pasos = (
+            "En Minecraft Bedrock: «Jugar» → «Servidores» → «Anadir servidor», "
+            f"direccion {host} y puerto {spec.bedrock_port}."
+        )
         if spec.bedrock_enabled:
-            self.bedrock_address.setText(f"{host}:{spec.bedrock_port}")
-            self.copy_bedrock_button.setEnabled(True)
             aviso = (
                 " Geyser y Floodgate se descargan solos al iniciar el servidor. Si el "
                 "servidor esta en marcha, hay que reiniciarlo para que entren."
                 if self._running
                 else " Geyser y Floodgate se descargan solos al iniciar el servidor."
             )
-            self.bedrock_note.setText(
-                "En Minecraft Bedrock: «Jugar» → «Servidores» → «Anadir servidor», "
-                f"direccion {host} y puerto {spec.bedrock_port}." + aviso
-            )
+            self.bedrock_note.setText(pasos + aviso)
         else:
-            self.bedrock_address.setText("Desactivado")
-            self.copy_bedrock_button.setEnabled(False)
             self.bedrock_note.setText(
-                "Los jugadores de movil, tablet y consola hablan otro idioma que Java: "
-                "para que entren hay que instalar los pluguins Geyser y Floodgate "
-                "(lo hace Serviscraft automaticamente al marcar la casilla)."
+                pasos
+                + " Solo se puede si usas el plugin: Geyser y Floodgate tienen que "
+                "estar instalados en el servidor (por ejemplo, desde la pestana "
+                "Plugins) y el puerto UDP tiene que estar abierto. Serviscraft no "
+                "puede saber si los has instalado a mano. Marca la casilla para que "
+                "se instalen solos y se abra el puerto."
             )
 
     def _cargar_cuentas(self) -> None:

@@ -51,6 +51,27 @@ def build_stylesheet(palette: QPalette) -> str:
     dark = window.lightness() < 128
     card_bg = QColor(base)
 
+    # Colores de las acciones de jugadores. Los rellenos usan texto blanco u
+    # oscuro segun su luminosidad; los botones solo con borde cambian de tono
+    # para seguir leyendose en claro y en oscuro.
+    green_fill = "#2E7D3A"
+    green_dark = "#1F5A29"
+    green_text = "#8FE39B" if dark else "#256B31"
+    gold_fill = "#C79A3A"
+    gold_dark = "#8A6A1E"
+    gold_text = "#F0CB72" if dark else "#7A5C16"
+    red_fill = "#B3261E"
+    red_dark = "#7D1A15"
+    orange_fill = "#B06018"
+    orange_dark = "#7A3F0D"
+    blue_fill = "#2C739B"
+    blue_dark = "#1E5472"
+    blue_text = "#8CCBEA" if dark else "#24617F"
+    teal_fill = "#1F6F6B"
+    teal_dark = "#134A47"
+    teal_text = "#85D6D0" if dark else "#1B5F5B"
+    stone_text = _rgba(text, 0.84)
+
     return f"""
     QWidget {{
         font-size: 10pt;
@@ -159,65 +180,224 @@ def build_stylesheet(palette: QPalette) -> str:
         background: transparent;
     }}
     QFrame#WhitelistBanner {{
-        background-color: {_rgba(QColor(BRAND_GREEN), 0.12)};
-        border: 2px solid {_rgba(QColor(BRAND_GREEN_DARK), 0.7)};
+        background: {_rgba(text, 0.035)};
+        border: 2px solid {_rgba(border, 0.55)};
         border-radius: 2px;
+    }}
+    QFrame#WhitelistBanner[active="true"] {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.12)};
+        border-color: {_rgba(QColor(BRAND_GREEN_DARK), 0.70)};
+    }}
+    QFrame#WhitelistBanner[active="false"] {{
+        background: {_rgba(QColor("#C79A3A"), 0.10)};
+        border-color: {_rgba(QColor("#8A6A1E"), 0.55)};
     }}
     QLabel#WhitelistTitle {{
         font-weight: 700;
         font-size: 11.5pt;
     }}
     QLabel#WhitelistState {{
-        color: {_rgba(text, 0.7)};
+        color: {_rgba(text, 0.72)};
         font-size: 9pt;
     }}
     QPushButton#WhitelistToggle {{
-        background: {BRAND_GREEN};
-        border: 2px solid {BRAND_GREEN_DARK};
+        background: {_rgba(text, 0.06)};
+        border: 2px solid {_rgba(QColor("#8A6A1E"), 0.65)};
         border-radius: 2px;
-        color: #ffffff;
+        color: {_rgba(text, 0.88)};
         font-weight: 800;
         padding: 8px 16px;
     }}
     QPushButton#WhitelistToggle:hover {{
-        background: {QColor(BRAND_GREEN).lighter(112).name()};
+        background: {_rgba(text, 0.11)};
     }}
     QPushButton#WhitelistToggle:pressed {{
-        background: {BRAND_GREEN_DARK};
+        background: {_rgba(text, 0.16)};
     }}
     QPushButton#WhitelistToggle:checked {{
-        background: {BRAND_GREEN_DARK};
-        border-color: #1b4d24;
+        background: {green_fill};
+        border: 2px solid {green_dark};
         color: #ffffff;
     }}
     QPushButton#WhitelistToggle:checked:hover {{
-        background: {QColor(BRAND_GREEN_DARK).lighter(112).name()};
+        background: {QColor(green_fill).lighter(110).name()};
+    }}
+    QPushButton#WhitelistToggle:checked:pressed {{
+        background: {QColor(green_fill).darker(112).name()};
+    }}
+    QPushButton#WhitelistToggle:disabled {{
+        background: {_rgba(text, 0.03)};
+        border-color: {_rgba(border, 0.40)};
+        color: {_rgba(text, 0.45)};
     }}
     QPushButton#InviteButton {{
-        background: {BRAND_GREEN};
-        border: 2px solid {BRAND_GREEN_DARK};
+        background: {green_fill};
+        border: 2px solid {green_dark};
         border-radius: 2px;
         color: #ffffff;
-        font-weight: 700;
+        font-weight: 800;
         padding: 7px 16px;
     }}
     QPushButton#InviteButton:hover {{
-        background: {QColor(BRAND_GREEN).lighter(112).name()};
+        background: {QColor(green_fill).lighter(110).name()};
     }}
     QPushButton#InviteButton:pressed {{
-        background: {BRAND_GREEN_DARK};
+        background: {QColor(green_fill).darker(112).name()};
     }}
     QPushButton#InviteButton:disabled {{
-        background: {_rgba(QColor(BRAND_GREEN), 0.35)};
-        border-color: {_rgba(QColor(BRAND_GREEN_DARK), 0.45)};
-        color: rgba(255, 255, 255, 0.7);
+        background: {_rgba(QColor(green_fill), 0.30)};
+        border-color: {_rgba(QColor(green_dark), 0.45)};
+        color: rgba(255, 255, 255, 0.62);
     }}
     #PlayersPanel QPushButton {{
         border-radius: 2px;
         padding: 7px 14px;
+        min-height: 20px;
     }}
-    #PlayersPanel QPushButton[playerAction="true"] {{
-        font-weight: 600;
+    #PlayersPanel QPushButton[panelRole="stone"] {{
+        background: {_rgba(text, 0.045)};
+        border: 2px solid {_rgba(border, 0.62)};
+        color: {stone_text};
+        font-weight: 700;
+    }}
+    #PlayersPanel QPushButton[panelRole="stone"]:hover {{
+        background: {_rgba(text, 0.10)};
+    }}
+    #PlayersPanel QPushButton[panelRole="stone"]:pressed {{
+        background: {_rgba(text, 0.15)};
+    }}
+    #PlayersPanel QPushButton[panelRole="stone"]:disabled {{
+        background: {_rgba(text, 0.02)};
+        border-color: {_rgba(border, 0.32)};
+        color: {_rgba(text, 0.40)};
+    }}
+    #PlayersPanel QPushButton[panelRole="list"] {{
+        background: {_rgba(QColor("#3C8FBF"), 0.10)};
+        border: 2px solid {_rgba(QColor("#2C739B"), 0.60)};
+        color: {blue_text};
+        font-weight: 700;
+    }}
+    #PlayersPanel QPushButton[panelRole="list"]:hover {{
+        background: {_rgba(QColor("#3C8FBF"), 0.18)};
+    }}
+    #PlayersPanel QPushButton[panelRole="list"]:pressed {{
+        background: {_rgba(QColor("#3C8FBF"), 0.24)};
+    }}
+    #PlayersPanel QPushButton[panelRole="list"]:disabled {{
+        background: {_rgba(text, 0.02)};
+        border-color: {_rgba(border, 0.32)};
+        color: {_rgba(text, 0.40)};
+    }}
+    /* Cada accion lleva su color: permisos (oro), acceso (verde), sanciones
+       (naranja/rojo) e inventario (azul). La fila deja de ser un bloque verde
+       uniforme y cada boton se reconoce por su tono. */
+    #PlayersPanel QPushButton[playerAction="op"] {{
+        background: {gold_fill};
+        border: 2px solid {gold_dark};
+        color: #241b07;
+        font-weight: 800;
+    }}
+    #PlayersPanel QPushButton[playerAction="op"]:hover {{
+        background: {QColor(gold_fill).lighter(110).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="op"]:pressed {{
+        background: {QColor(gold_fill).darker(112).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="deop"] {{
+        background: {_rgba(QColor(gold_fill), 0.14)};
+        border: 2px solid {_rgba(QColor(gold_fill), 0.70)};
+        color: {gold_text};
+        font-weight: 700;
+    }}
+    #PlayersPanel QPushButton[playerAction="deop"]:hover {{
+        background: {_rgba(QColor(gold_fill), 0.22)};
+    }}
+    #PlayersPanel QPushButton[playerAction="deop"]:pressed {{
+        background: {_rgba(QColor(gold_fill), 0.30)};
+    }}
+    #PlayersPanel QPushButton[playerAction="whitelist_add"] {{
+        background: {green_fill};
+        border: 2px solid {green_dark};
+        color: #ffffff;
+        font-weight: 800;
+    }}
+    #PlayersPanel QPushButton[playerAction="whitelist_add"]:hover {{
+        background: {QColor(green_fill).lighter(110).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="whitelist_add"]:pressed {{
+        background: {QColor(green_fill).darker(112).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="whitelist_remove"] {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.14)};
+        border: 2px solid {_rgba(QColor(BRAND_GREEN_DARK), 0.65)};
+        color: {green_text};
+        font-weight: 700;
+    }}
+    #PlayersPanel QPushButton[playerAction="whitelist_remove"]:hover {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.22)};
+    }}
+    #PlayersPanel QPushButton[playerAction="whitelist_remove"]:pressed {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.30)};
+    }}
+    #PlayersPanel QPushButton[playerAction="kick"] {{
+        background: {orange_fill};
+        border: 2px solid {orange_dark};
+        color: #ffffff;
+        font-weight: 800;
+    }}
+    #PlayersPanel QPushButton[playerAction="kick"]:hover {{
+        background: {QColor(orange_fill).lighter(110).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="kick"]:pressed {{
+        background: {QColor(orange_fill).darker(112).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="ban"] {{
+        background: {red_fill};
+        border: 2px solid {red_dark};
+        color: #ffffff;
+        font-weight: 800;
+    }}
+    #PlayersPanel QPushButton[playerAction="ban"]:hover {{
+        background: {QColor(red_fill).lighter(110).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="ban"]:pressed {{
+        background: {QColor(red_fill).darker(112).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="pardon"] {{
+        background: {teal_fill};
+        border: 2px solid {teal_dark};
+        color: #ffffff;
+        font-weight: 800;
+    }}
+    #PlayersPanel QPushButton[playerAction="pardon"]:hover {{
+        background: {QColor(teal_fill).lighter(110).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="pardon"]:pressed {{
+        background: {QColor(teal_fill).darker(112).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="inventario"] {{
+        background: {blue_fill};
+        border: 2px solid {blue_dark};
+        color: #ffffff;
+        font-weight: 800;
+    }}
+    #PlayersPanel QPushButton[playerAction="inventario"]:hover {{
+        background: {QColor(blue_fill).lighter(110).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="inventario"]:pressed {{
+        background: {QColor(blue_fill).darker(112).name()};
+    }}
+    #PlayersPanel QPushButton[playerAction="op"]:disabled,
+    #PlayersPanel QPushButton[playerAction="deop"]:disabled,
+    #PlayersPanel QPushButton[playerAction="whitelist_add"]:disabled,
+    #PlayersPanel QPushButton[playerAction="whitelist_remove"]:disabled,
+    #PlayersPanel QPushButton[playerAction="kick"]:disabled,
+    #PlayersPanel QPushButton[playerAction="ban"]:disabled,
+    #PlayersPanel QPushButton[playerAction="pardon"]:disabled,
+    #PlayersPanel QPushButton[playerAction="inventario"]:disabled {{
+        background: {_rgba(text, 0.055)};
+        border-color: {_rgba(border, 0.35)};
+        color: {_rgba(text, 0.42)};
     }}
     #PlayersPanel QTableWidget {{
         border: 2px solid {_rgba(border, 0.55)};
@@ -509,6 +689,378 @@ def build_stylesheet(palette: QPalette) -> str:
         color: rgba(255, 255, 255, 0.70);
     }}
 
+    /* ------------------------------------- detalles y mods: tarjetas de bloque */
+    QToolButton#MinecraftHeroHelp {{
+        background: rgba(255, 255, 255, 0.16);
+        border: 2px solid rgba(255, 255, 255, 0.62);
+        border-radius: 2px;
+        color: #ffffff;
+        font-weight: 700;
+    }}
+    QToolButton#MinecraftHeroHelp:hover {{
+        background: rgba(255, 255, 255, 0.30);
+        border-color: rgba(255, 255, 255, 0.92);
+    }}
+    QFrame#SectionCard[accent] {{
+        border-radius: 3px;
+        border-width: 2px;
+    }}
+    QFrame#SectionCard[accent="green"] {{
+        border-color: {_rgba(QColor("#2E7D3A"), 0.62)};
+    }}
+    QFrame#SectionCard[accent="gold"] {{
+        border-color: {_rgba(QColor("#A87B24"), 0.64)};
+    }}
+    QFrame#SectionCard[accent="blue"] {{
+        border-color: {_rgba(QColor("#2C739B"), 0.64)};
+    }}
+    QFrame#SectionCard[accent="brown"] {{
+        border-color: {_rgba(QColor("#8A5A2B"), 0.64)};
+    }}
+    QFrame#SectionCard[accent] QLabel#SectionTitle {{
+        font-size: 12.5pt;
+        font-weight: 800;
+        color: {_rgba(text, 0.92)};
+    }}
+
+    /* ------------------------------------------------------- pestana Detalles */
+    #DetailsPanel QLabel#DetailKey {{
+        color: {_rgba(text, 0.62)};
+        font-weight: 600;
+    }}
+    #DetailsPanel QLabel#DetailValue {{
+        color: {text.name()};
+        font-weight: 600;
+    }}
+    #DetailsPanel QFrame#DetailSlot {{
+        background: {_rgba(text, 0.045)};
+        border: 1px solid {_rgba(border, 0.35)};
+        border-radius: 2px;
+    }}
+    QLineEdit#DetailsPath {{
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid {_rgba(border, 0.35)};
+        border-radius: 0px;
+        padding: 1px 1px 2px 1px;
+        font-family: "JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+        font-size: 9.5pt;
+    }}
+    QLineEdit#DetailsPath:focus {{
+        border-bottom: 1px solid {BRAND_GREEN};
+    }}
+    #DetailsPanel QPlainTextEdit {{
+        background: {base.name()};
+        border: 2px solid {_rgba(border, 0.55)};
+        border-radius: 2px;
+        padding: 6px;
+    }}
+    #DetailsPanel QPushButton {{
+        border-radius: 2px;
+        padding: 7px 15px;
+    }}
+    #DetailsPanel QPushButton[accent="true"] {{
+        background: {BRAND_GREEN};
+        border: 2px solid {BRAND_GREEN_DARK};
+        color: #ffffff;
+        font-weight: 800;
+    }}
+    #DetailsPanel QPushButton[accent="true"]:hover {{
+        background: {QColor(BRAND_GREEN).lighter(110).name()};
+    }}
+    #DetailsPanel QPushButton[accent="true"]:pressed {{
+        background: {BRAND_GREEN_DARK};
+    }}
+
+    /* ----------------------------------------------------------- pestana Mods */
+    #ModsPanel QPushButton {{
+        border-radius: 2px;
+        padding: 7px 15px;
+    }}
+    #ModsPanel QPushButton[accent="true"] {{
+        background: {QColor("#C79A3A").name()};
+        border: 2px solid #8A6A1E;
+        border-radius: 2px;
+        color: #241b07;
+        font-weight: 800;
+    }}
+    #ModsPanel QPushButton[accent="true"]:hover {{
+        background: {QColor("#C79A3A").lighter(110).name()};
+    }}
+    #ModsPanel QPushButton[accent="true"]:pressed {{
+        background: {QColor("#C79A3A").darker(112).name()};
+    }}
+    #ModsPanel QPushButton[accent="true"]:disabled {{
+        background: {_rgba(QColor("#C79A3A"), 0.35)};
+        border-color: {_rgba(QColor("#8A6A1E"), 0.45)};
+        color: rgba(36, 27, 7, 0.65);
+    }}
+    #ModsPanel QPushButton[danger="true"] {{
+        color: #b3261e;
+        border-color: {_rgba(QColor("#b3261e"), 0.55)};
+    }}
+    #ModsPanel QPushButton[danger="true"]:hover {{
+        background: {_rgba(QColor("#b3261e"), 0.14)};
+    }}
+    QTableWidget#ModsTable,
+    QTableWidget#MissingModsTable {{
+        background: {base.name()};
+        alternate-background-color: {_rgba(text, 0.035)};
+        border: 2px solid {_rgba(border, 0.55)};
+        border-radius: 2px;
+        gridline-color: {_rgba(border, 0.30)};
+        selection-background-color: {_rgba(QColor("#C79A3A"), 0.55)};
+        selection-color: #241b07;
+    }}
+    QTableWidget#ModsTable QHeaderView::section {{
+        background: {_rgba(QColor("#C79A3A"), 0.22)};
+        border: none;
+        border-bottom: 2px solid {_rgba(QColor("#8A6A1E"), 0.58)};
+        padding: 6px 8px;
+        font-weight: 700;
+    }}
+    QTableWidget#MissingModsTable QHeaderView::section {{
+        background: {_rgba(QColor("#3C8FBF"), 0.20)};
+        border: none;
+        border-bottom: 2px solid {_rgba(QColor("#2C739B"), 0.58)};
+        padding: 6px 8px;
+        font-weight: 700;
+    }}
+    QTableWidget#ModsTable::item:hover,
+    QTableWidget#MissingModsTable::item:hover {{
+        background: {_rgba(text, 0.06)};
+    }}
+    QFrame#ModsInstalledSeparator {{
+        background: {_rgba(QColor("#C79A3A"), 0.35)};
+        border: none;
+    }}
+    QFrame#ModsMissingSeparator {{
+        background: {_rgba(QColor("#3C8FBF"), 0.35)};
+        border: none;
+    }}
+
+    /* ------------------------------------------ jugadores: tabla y acciones */
+    QTableWidget#PlayersTable {{
+        background: {base.name()};
+        alternate-background-color: {_rgba(text, 0.030)};
+        border: 2px solid {_rgba(border, 0.50)};
+        border-radius: 2px;
+        gridline-color: transparent;
+        selection-background-color: {_rgba(accent, 0.58)};
+        selection-color: {accent_text.name()};
+    }}
+    QTableWidget#PlayersTable QHeaderView::section {{
+        background: {_rgba(QColor("#3C8FBF"), 0.18)};
+        border: none;
+        border-bottom: 2px solid {_rgba(QColor("#2C739B"), 0.55)};
+        padding: 7px 8px;
+        font-weight: 700;
+    }}
+    QTableWidget#PlayersTable::item {{
+        padding: 2px 4px;
+    }}
+    QFrame#PlayerActionsPanel {{
+        background: {_rgba(text, 0.035)};
+        border: 1px solid {_rgba(border, 0.45)};
+        border-left: 3px solid {_rgba(QColor("#3C8FBF"), 0.65)};
+        border-radius: 3px;
+    }}
+
+    /* ------------------------------------------- catalogo de Modrinth */
+    QLineEdit#CatalogSearch {{
+        background: {base.name()};
+        border: 2px solid {_rgba(border, 0.55)};
+        border-radius: 2px;
+        padding: 7px 10px;
+    }}
+    QLineEdit#CatalogSearch:focus {{
+        border-color: #3C8FBF;
+    }}
+    QFrame#CatalogToolbar {{
+        background: {_rgba(text, 0.035)};
+        border: 1px solid {_rgba(border, 0.45)};
+        border-radius: 3px;
+    }}
+    QTableWidget#CatalogTable {{
+        background: {base.name()};
+        color: {text.name()};
+        alternate-background-color: {_rgba(text, 0.030)};
+        border: 2px solid {_rgba(border, 0.50)};
+        border-radius: 2px;
+        gridline-color: transparent;
+        selection-background-color: {_rgba(accent, 0.58)};
+        selection-color: {accent_text.name()};
+    }}
+    QTableWidget#CatalogTable QHeaderView::section {{
+        background: {_rgba(QColor("#3C8FBF"), 0.18)};
+        border: none;
+        border-bottom: 2px solid {_rgba(QColor("#2C739B"), 0.58)};
+        padding: 7px 8px;
+        font-weight: 700;
+    }}
+    QTableWidget#CatalogTable[catalogMode="mods"] QHeaderView::section {{
+        background: {_rgba(QColor("#C79A3A"), 0.20)};
+        border-bottom-color: {_rgba(QColor("#8A6A1E"), 0.58)};
+    }}
+    QFrame#CatalogDetails {{
+        background: {_rgba(text, 0.032)};
+        border: 1px solid {_rgba(border, 0.45)};
+        border-left: 3px solid {_rgba(QColor("#3C8FBF"), 0.72)};
+        border-radius: 3px;
+    }}
+    QFrame#CatalogDetails[catalogMode="mods"] {{
+        border-left-color: {_rgba(QColor("#C79A3A"), 0.80)};
+    }}
+    QLabel#CatalogDetailsTitle {{
+        font-size: 11pt;
+        font-weight: 800;
+        color: {_rgba(text, 0.92)};
+    }}
+    QLabel#CatalogDetailsMeta {{
+        color: {_rgba(text, 0.62)};
+        font-size: 8.8pt;
+    }}
+    QLabel#CatalogDetailsText {{
+        color: {_rgba(text, 0.78)};
+        font-size: 9pt;
+    }}
+
+    /* --------------------------------- versiones publicadas y contenido elegido */
+    QFrame#CatalogVersions {{
+        background: {_rgba(text, 0.028)};
+        border: 1px solid {_rgba(border, 0.42)};
+        border-left: 3px solid {_rgba(QColor("#3C8FBF"), 0.58)};
+        border-radius: 3px;
+    }}
+    QFrame#CatalogVersions[catalogMode="mods"] {{
+        border-left-color: {_rgba(QColor("#C79A3A"), 0.72)};
+    }}
+    QLabel#CatalogVersionsTitle {{
+        color: {_rgba(text, 0.82)};
+        font-size: 9.2pt;
+        font-weight: 700;
+    }}
+    QTableWidget#CatalogVersionsTable {{
+        background: {base.name()};
+        color: {text.name()};
+        alternate-background-color: {_rgba(text, 0.030)};
+        border: 1px solid {_rgba(border, 0.42)};
+        border-radius: 2px;
+        gridline-color: transparent;
+        selection-background-color: {_rgba(QColor("#3C8FBF"), 0.42)};
+        selection-color: {_rgba(text, 0.95)};
+    }}
+    QTableWidget#CatalogVersionsTable QHeaderView::section {{
+        background: {_rgba(QColor("#3C8FBF"), 0.14)};
+        border: none;
+        border-bottom: 1px solid {_rgba(border, 0.50)};
+        padding: 4px 6px;
+        font-size: 8.6pt;
+        font-weight: 700;
+        color: {_rgba(text, 0.76)};
+    }}
+    QTableWidget#CatalogVersionsTable[catalogMode="mods"] QHeaderView::section {{
+        background: {_rgba(QColor("#C79A3A"), 0.16)};
+    }}
+    QTableWidget#CatalogVersionsTable::item {{
+        padding: 3px 5px;
+    }}
+    QPushButton#CatalogInstall {{
+        background: {QColor("#3C8FBF").name()};
+        border: 2px solid #2C739B;
+        border-radius: 2px;
+        color: #ffffff;
+        font-weight: 800;
+        padding: 7px 16px;
+    }}
+    QPushButton#CatalogInstall:hover {{
+        background: {QColor("#3C8FBF").lighter(110).name()};
+    }}
+    QPushButton#CatalogInstall:pressed {{
+        background: {QColor("#3C8FBF").darker(112).name()};
+    }}
+    QPushButton#CatalogInstall[catalogMode="mods"] {{
+        background: {QColor("#C79A3A").name()};
+        border-color: #8A6A1E;
+        color: #241b07;
+    }}
+    QPushButton#CatalogInstall[catalogMode="mods"]:hover {{
+        background: {QColor("#C79A3A").lighter(110).name()};
+    }}
+    QPushButton#CatalogInstall[catalogMode="mods"]:pressed {{
+        background: {QColor("#C79A3A").darker(112).name()};
+    }}
+    QPushButton#CatalogInstall:disabled {{
+        background: {_rgba(text, 0.10)};
+        border-color: {_rgba(border, 0.45)};
+        color: {_rgba(text, 0.38)};
+    }}
+    QListWidget#ContentSelectedList {{
+        background: {base.name()};
+        color: {text.name()};
+        border: 1px solid {_rgba(border, 0.50)};
+        border-left: 3px solid {_rgba(QColor(BRAND_GREEN), 0.72)};
+        border-radius: 3px;
+        padding: 3px;
+        outline: none;
+    }}
+    QListWidget#ContentSelectedList::item {{
+        padding: 4px 6px;
+        border-radius: 2px;
+    }}
+    QListWidget#ContentSelectedList::item:hover:!selected {{
+        background: {_rgba(text, 0.05)};
+    }}
+    QListWidget#ContentSelectedList::item:selected {{
+        background: {_rgba(accent, 0.30)};
+        color: {text.name()};
+    }}
+    #PluginsPanel {{
+        background: transparent;
+    }}
+
+    /* -------------------------------------- ranuras, avisos y zona de arrastre */
+    QFrame#MinecraftEmpty {{
+        background: {_rgba(text, 0.035)};
+        border: 2px dashed {_rgba(border, 0.55)};
+        border-radius: 3px;
+    }}
+    QLabel#MinecraftEmptyTitle {{
+        font-size: 10.5pt;
+        font-weight: 800;
+        color: {_rgba(text, 0.88)};
+    }}
+    QLabel#MinecraftEmptyText {{
+        color: {_rgba(text, 0.64)};
+        font-size: 9pt;
+    }}
+    QFrame#MinecraftDropZone {{
+        background: {_rgba(QColor("#C79A3A"), 0.10)};
+        border: 2px dashed {_rgba(QColor("#A87B24"), 0.62)};
+        border-radius: 3px;
+    }}
+    QFrame#MinecraftDropZone:hover {{
+        background: {_rgba(QColor("#C79A3A"), 0.18)};
+        border-color: {_rgba(QColor("#C79A3A"), 0.90)};
+    }}
+    QFrame#MinecraftDropZone[dragActive="true"] {{
+        background: {_rgba(QColor("#3FA34D"), 0.20)};
+        border: 2px solid {BRAND_GREEN};
+    }}
+    QFrame#MinecraftDropZone:disabled {{
+        background: {_rgba(text, 0.03)};
+        border-color: {_rgba(border, 0.35)};
+    }}
+    QLabel#MinecraftDropTitle {{
+        font-size: 10.5pt;
+        font-weight: 800;
+        color: {_rgba(text, 0.90)};
+    }}
+    QLabel#MinecraftDropHint {{
+        color: {_rgba(text, 0.64)};
+        font-size: 9pt;
+    }}
+
     /* -------------------------------------------------- secciones con ayuda «?» */
     #SectionCard {{
         background: {_rgba(card_bg, 0.55)};
@@ -734,17 +1286,158 @@ def build_stylesheet(palette: QPalette) -> str:
     }}
 
     /* --------------------------------------------------------------- consola */
+    QFrame#ConsoleStatusBar {{
+        background: #1b1e24;
+        border: 1px solid #0d0f12;
+        border-radius: 3px;
+    }}
+    QLabel#ConsoleStatusText {{
+        color: #c6ccd4;
+        font-size: 9pt;
+    }}
+    QLabel#ConsoleCounter {{
+        color: #8d95a1;
+        font-family: "JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+        font-size: 8.5pt;
+    }}
+    QLabel#ConsoleStateBadge {{
+        background: #2a2f37;
+        border: 1px solid #3b424d;
+        border-radius: 3px;
+        color: #aab1bc;
+        font-size: 7.8pt;
+        font-weight: 800;
+        letter-spacing: 1px;
+        padding: 2px 7px;
+    }}
+    QLabel#ConsoleStateBadge[tone="running"] {{
+        background: {_rgba(QColor(BRAND_GREEN), 0.22)};
+        border-color: {_rgba(QColor("#7fd6a2"), 0.65)};
+        color: #8fe39b;
+    }}
+    QLabel#ConsoleStateBadge[tone="paused"] {{
+        background: {_rgba(QColor("#b45309"), 0.22)};
+        border-color: {_rgba(QColor("#ffcc66"), 0.55)};
+        color: #ffcc66;
+    }}
+    QLabel#ConsoleStateBadge[tone="stopped"] {{
+        background: {_rgba(QColor("#78808c"), 0.16)};
+        border-color: {_rgba(QColor("#a8adb5"), 0.40)};
+        color: #c2c8d0;
+    }}
+    QLabel#ConsoleStateBadge[tone="none"] {{
+        background: {_rgba(QColor("#78808c"), 0.12)};
+        border-color: {_rgba(QColor("#a8adb5"), 0.25)};
+        color: #9aa2ad;
+    }}
+    QFrame#ConsoleToolbar {{
+        background: {_rgba(text, 0.030)};
+        border: 1px solid {_rgba(border, 0.42)};
+        border-radius: 3px;
+    }}
+    QLineEdit#ConsoleFilter {{
+        background: {base.name()};
+        border: 2px solid {_rgba(border, 0.55)};
+        border-radius: 2px;
+        padding: 6px 9px;
+    }}
+    QLineEdit#ConsoleFilter:focus {{
+        border-color: {BRAND_GREEN};
+    }}
+    QFrame#ConsoleTerminal {{
+        background: #121418;
+        border: 2px solid #080a0d;
+        border-radius: 4px;
+    }}
+    QFrame#ConsoleTerminalBar {{
+        background: #1b1e24;
+        border-bottom: 1px solid #080a0d;
+    }}
+    QLabel#ConsoleTerminalTitle {{
+        color: #9aa2ad;
+        font-family: "JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+        font-size: 8pt;
+        font-weight: 700;
+        letter-spacing: 1px;
+    }}
+    QLabel#ConsoleLegend {{
+        color: #8d95a1;
+        font-size: 8pt;
+    }}
     QPlainTextEdit#ConsoleOutput {{
-        background: {("#14161a" if dark else "#1e2126")};
+        background: #121418;
         color: #d7dbe0;
-        border: 1px solid {_rgba(border, 0.6)};
-        border-radius: 8px;
+        border: none;
+        border-radius: 0;
         font-family: "JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
         font-size: 9.5pt;
-        padding: 6px;
+        padding: 8px;
+        selection-background-color: {BRAND_GREEN_DARK};
+    }}
+    QFrame#ConsoleCommandBar {{
+        background: #1b1e24;
+        border-top: 1px solid #080a0d;
+    }}
+    QLabel#ConsolePrompt {{
+        color: #7fd6a2;
+        font-family: "JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+        font-size: 13pt;
+        font-weight: 700;
+        padding: 0 2px;
     }}
     QLineEdit#ConsoleInput {{
+        background: #0e1014;
+        color: #e6e9ee;
+        border: 1px solid #2b313a;
+        border-radius: 3px;
+        padding: 6px 9px;
         font-family: "JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+        selection-background-color: {BRAND_GREEN_DARK};
+    }}
+    QLineEdit#ConsoleInput:focus {{
+        border: 1px solid {BRAND_GREEN};
+    }}
+    QLineEdit#ConsoleInput:disabled {{
+        background: #121419;
+        color: #6c737d;
+        border-color: #242930;
+    }}
+    QFrame#ConsoleCommandBar QComboBox {{
+        background: #0e1014;
+        color: #d7dbe0;
+        border: 1px solid #2b313a;
+        border-radius: 3px;
+        padding: 5px 8px;
+    }}
+    QFrame#ConsoleCommandBar QComboBox:disabled {{
+        background: #121419;
+        color: #6c737d;
+        border-color: #242930;
+    }}
+    QFrame#ConsoleCommandBar QComboBox QAbstractItemView {{
+        background: #1b1e24;
+        color: #d7dbe0;
+        selection-background-color: {BRAND_GREEN_DARK};
+        selection-color: #ffffff;
+    }}
+    QFrame#ConsoleCommandBar QPushButton {{
+        background: {BRAND_GREEN};
+        border: 2px solid #1b4d24;
+        border-radius: 2px;
+        color: #ffffff;
+        font-weight: 700;
+        padding: 6px 12px;
+    }}
+    QFrame#ConsoleCommandBar QPushButton:hover {{
+        background: {QColor(BRAND_GREEN).lighter(110).name()};
+    }}
+    QFrame#ConsoleCommandBar QPushButton:pressed {{
+        background: {BRAND_GREEN_DARK};
+    }}
+    QFrame#ConsoleCommandBar QPushButton:disabled {{
+        background: #2b3138;
+        border-color: #20252b;
+        color: #6c737d;
     }}
 
     /* ------------------------------------------------------------ barra lateral */

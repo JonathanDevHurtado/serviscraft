@@ -322,6 +322,55 @@ def icono_jugador(size: int = SIZE) -> QPixmap:
 
 
 @lru_cache(maxsize=32)
+def icono_jugador_duda(size: int = SIZE) -> QPixmap:
+    """Cabeza de jugador desconocido: cara de piedra con un signo de duda.
+
+    Se usa cuando no hay ningun jugador elegido o cuando el servidor todavia
+    no conoce a nadie. La cara es gris (no la piel de Steve) para que no se
+    confunda con un jugador real, y el signo se dibuja con pixeles, como el
+    resto de iconos del juego.
+    """
+    pixmap = _lienzo(size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+    unidad = float(size) / 8.0
+
+    def celda(x: float, y: float, ancho: float, alto: float, color: str) -> None:
+        _relleno(painter, color)
+        painter.drawRect(QRectF(x * unidad, y * unidad, ancho * unidad, alto * unidad))
+
+    # Marco oscuro y cara de piedra, con el pelo en la parte de arriba.
+    celda(0, 0, 8, 8, "#39424a")
+    celda(1, 1, 6, 6, "#9aa4ad")
+    celda(1, 1, 6, 2, "#5d6873")
+    celda(1, 3, 1, 1, "#5d6873")
+    celda(6, 3, 1, 1, "#5d6873")
+
+    # Signo de interrogacion de 5 x 7 pixeles, dibujado celda a celda.
+    dibujo = (
+        "01110",
+        "10001",
+        "00001",
+        "00110",
+        "00100",
+        "00000",
+        "00100",
+    )
+    for fila, bits in enumerate(dibujo):
+        for columna, bit in enumerate(bits):
+            if bit == "1":
+                celda(
+                    2 + columna * 0.78,
+                    2.15 + fila * 0.62,
+                    0.78,
+                    0.62,
+                    "#fff3cf",
+                )
+    painter.end()
+    return pixmap
+
+
+@lru_cache(maxsize=32)
 def icono_consola(size: int = SIZE) -> QPixmap:
     """Ventanita de terminal con el simbolo «>»: la pestana de consola."""
     pixmap = _lienzo(size)

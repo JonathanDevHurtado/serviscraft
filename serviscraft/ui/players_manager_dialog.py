@@ -196,7 +196,10 @@ class PlayersManagerDialog(QDialog):
         campo = QLineEdit()
         campo.setPlaceholderText("Nombre del jugador")
         campo.setClearButtonEnabled(True)
-        campo.setMaxLength(32)
+        campo.setMaxLength(33)
+        campo.setToolTip(
+            "Nombre del jugador. Los de Bedrock llevan un punto delante (.Steve)."
+        )
         campo.returnPressed.connect(lambda k=key: self._anadir(k))
         fila.addWidget(campo, 1)
         self._inputs[key] = campo

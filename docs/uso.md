@@ -265,6 +265,12 @@ operadores y los bloqueados se leen de los archivos del servidor
 sin arrancar nada. Quién está conectado, en cambio, solo se puede preguntar al
 servidor en marcha.
 
+Los **jugadores de Bedrock** aparecen con un punto delante del nombre
+(`.Steve`): lo pone Floodgate para distinguirlos. El punto forma parte del
+nombre que entiende el servidor, así que se invitan, se expulsan y se bloquean
+igual que los demás. La ficha superior los cuenta y, al elegir uno, la zona de
+acciones avisa de que es un jugador de Bedrock.
+
 ### Gestionar las listas
 
 El botón **Gestionar listas…** abre una sola ventana con las **tres listas** del
@@ -306,7 +312,8 @@ y pulsa **Dar OP**, **Quitar OP**, **Añadir a la lista**, **Quitar de la lista*
 - **Bloquear** pide confirmación: el jugador no podrá volver hasta que uses
   **Perdonar**.
 - Los nombres se validan antes de enviar nada (letras, números y guion bajo,
-  hasta 32 caracteres), de modo que nunca se cuela un comando por accidente.
+  hasta 32 caracteres; los de Bedrock pueden llevar además un punto delante),
+  de modo que nunca se cuela un comando por accidente.
 - El panel **se refresca solo** después de cada acción para que veas el efecto, y
   puedes actualizarlo cuando quieras con **Refrescar**.
 
@@ -518,18 +525,27 @@ dirección de Java**. Serviscraft lo resuelve con dos plugins oficiales:
 - **Floodgate**: deja entrar a quien **no tiene cuenta de Java** (solo la de
   Xbox Live, que es la que usa Bedrock).
 
-Para activarlo, marca **Permitir jugadores de Bedrock (Geyser)** en esa misma
-pestaña:
+La dirección y el puerto de Bedrock se muestran **siempre que el servidor sea
+Paper**, aunque la casilla esté desmarcada. La razón es que también puedes
+instalar Geyser y Floodgate a mano desde la pestaña **Plugins**: en ese caso la
+nota lo dice claramente («Solo se puede si usas el plugin») y recuerda que el
+puerto UDP tiene que estar abierto.
+
+Para que Serviscraft los instale y abra el puerto por ti, marca **Permitir
+jugadores de Bedrock (Geyser)** en esa misma pestaña:
 
 - Solo está disponible en servidores **Paper** (es el único tipo que acepta
-  plugins). En los demás la casilla sale desactivada y se explica por qué.
+  plugins). En los demás la casilla sale desactivada, la dirección aparece como
+  *No disponible* y se explica por qué.
 - Se descarga el **puerto UDP** (19132 por defecto, o el siguiente libre) y se
   publica aparte del puerto de Java. El mundo, los mods y las copias **no se
   tocan**.
 - Hay que hacerlo con el **servidor detenido**: se recrea el contenedor (los
   plugins se descargan en el arranque siguiente).
 - En Bedrock se entra por **Jugar → Servidores → Añadir servidor**, con la IP del
-  equipo y el puerto UDP que muestra la ventana.
+  equipo y el puerto UDP que muestra la ventana. Si instalaste los plugins a
+  mano, Serviscraft no puede saberlo: la dirección solo funciona con Geyser y
+  Floodgate puestos.
 - La primera vez que el servidor arranca, Geyser escribe su `config.yml`.
   Serviscraft lo ajusta solo (`auth-type: floodgate`) y **avisa de que hay que
   reiniciar** para que surta efecto.

@@ -87,6 +87,8 @@ class Project:
     game_versions: tuple[str, ...] = ()
     #: Cargadores compatibles deducidos de las categorias de Modrinth.
     loaders: tuple[str, ...] = ()
+    #: Todas las categorias del proyecto (optimizacion, utilidad, aventura...).
+    categories: tuple[str, ...] = ()
     client_side: str = ""
     server_side: str = ""
     #: Fecha ISO de la ultima publicacion (``2025-03-04T12:00:00Z``).
@@ -152,6 +154,33 @@ class Release:
     version_id: str = ""
     #: ``release``, ``beta`` o ``alpha``.
     version_type: str = ""
+    #: Fecha ISO de publicacion de esta version concreta.
+    published: str = ""
+
+    @property
+    def published_label(self) -> str:
+        """Fecha legible (``04/03/2025``) a partir del ISO de Modrinth."""
+        partes = (self.published or "").strip()[:10].split("-")
+        if len(partes) != 3 or not all(parte.isdigit() for parte in partes):
+            return "sin datos"
+        anio, mes, dia = partes
+        return f"{dia}/{mes}/{anio}"
+
+    @property
+    def type_label(self) -> str:
+        return {
+            "release": "estable",
+            "beta": "beta",
+            "alpha": "alfa",
+        }.get((self.version_type or "").strip().lower(), "sin datos")
+
+
+@dataclass(frozen=True)
+class ContentSelection:
+    """Proyecto y version concreta elegidos para instalar en un servidor."""
+
+    project: Project
+    release: Release
 
 
 def loaders_for_spec(spec) -> tuple[str, ...]:
@@ -183,7 +212,11 @@ def loaders_for(server_type: ServerType) -> tuple[str, ...]:
 
 
 def search_facets(
-    project_type: str, game_version: str | None = None, loaders: tuple[str, ...] = ()
+    project_type: str,
+    game_version: str | None = None,
+    loaders: tuple[str, ...] = (),
+    *,
+    category: str = "",
 ) -> str:
     """Construye el filtro de busqueda de Modrinth (JSON compacto).
 
@@ -198,6 +231,9 @@ def search_facets(
     limpios = [str(loader).strip().lower() for loader in loaders if str(loader).strip()]
     if limpios:
         facets.append([f"categories:{loader}" for loader in limpios])
+    limpia_categoria = str(category or "").strip().lower()
+    if limpia_categoria:
+        facets.append([f"categories:{limpia_categoria}"])
     return json.dumps(facets, separators=(",", ":"))
 
 
@@ -238,6 +274,7 @@ def parse_project(hit: dict[str, Any]) -> Project:
         project_type=str(hit.get("project_type") or ""),
         game_versions=tuple(str(v) for v in hit.get("versions") or [] if str(v).strip()),
         loaders=tuple(categoria for categoria in categorias if categoria in LOADER_CATEGORIES),
+        categories=tuple(categorias),
         client_side=str(hit.get("client_side") or ""),
         server_side=str(hit.get("server_side") or ""),
         updated=str(hit.get("date_modified") or ""),
@@ -278,7 +315,13 @@ def parse_release(project_id: str, data: dict[str, Any]) -> Release | None:
         dependencies=dependencies,
         version_id=str(data.get("id") or ""),
         version_type=str(data.get("version_type") or ""),
+        published=str(data.get("date_published") or ""),
     )
+
+
+#: Ordenes que entiende la busqueda de Modrinth. Se usan tanto en el catalogo
+#: como en la busqueda de modpacks.
+SEARCH_INDEXES: tuple[str, ...] = ("relevance", "downloads", "follows", "updated", "newest")
 
 
 def search_projects(
@@ -287,13 +330,18 @@ def search_projects(
     project_type: str,
     game_version: str | None = None,
     limit: int = 25,
+    offset: int = 0,
     only_server_side: bool = True,
     loaders: tuple[str, ...] = (),
+    index: str = "",
+    category: str = "",
 ) -> list[Project]:
     """Busca proyectos compatibles con la version y los cargadores indicados.
 
     Si la busqueda esta vacia se muestran los mas descargados, de forma que la
-    ventana no aparezca en blanco la primera vez.
+    ventana no aparezca en blanco la primera vez. ``index`` permite ordenar por
+    relevancia, descargas, seguimientos, ultima actualizacion o novedad.
+    ``offset`` permite pedir la siguiente tanda de resultados («Cargar mas»).
 
     ``only_server_side`` descarta los proyectos de cliente, que no sirven en un
     servidor. Los modpacks son la excepcion: Modrinth los marca casi siempre
@@ -301,11 +349,17 @@ def search_projects(
     instala perfectamente.
     """
     cleaned = (query or "").strip()
+    orden = (index or "").strip().lower()
+    if orden not in SEARCH_INDEXES:
+        orden = "relevance" if cleaned else "downloads"
     params = {
         "query": cleaned,
-        "facets": search_facets(project_type, game_version, loaders),
+        "facets": search_facets(
+            project_type, game_version, loaders, category=category
+        ),
         "limit": str(max(1, min(limit, 50))),
-        "index": "relevance" if cleaned else "downloads",
+        "offset": str(max(0, int(offset or 0))),
+        "index": orden,
     }
     data = _request_json(f"{API_URL}/search?{urllib.parse.urlencode(params)}")
     if not isinstance(data, dict):
@@ -351,8 +405,49 @@ def fetch_releases(
     return releases
 
 
+def release_is_compatible(
+    release: Release,
+    *,
+    game_version: str | None = None,
+    loaders: tuple[str, ...] = (),
+) -> bool:
+    """True si la version concreta puede usarse en ese servidor.
+
+    Se usa para enseñar tambien las versiones que no encajan (en gris) y para
+    no instalar por error un fichero de otra version de Minecraft o de otro
+    cargador.
+    """
+    version = str(game_version or "").strip()
+    if version and version != "latest" and version not in release.game_versions:
+        return False
+    validos = {str(loader).strip().lower() for loader in loaders if str(loader).strip()}
+    if not validos:
+        return True
+    disponibles = {str(loader).strip().lower() for loader in release.loaders}
+    # Un proyecto sin cargadores anunciados se deja pasar: Modrinth no siempre
+    # rellena ese dato y es mejor no ocultar contenido valido.
+    return not disponibles or bool(validos & disponibles)
+
+
+def choose_compatible_release(
+    releases: list[Release],
+    *,
+    game_version: str | None = None,
+    loaders: tuple[str, ...] = (),
+) -> Release | None:
+    """Primera version (la mas reciente) compatible con el servidor."""
+    for release in releases:
+        if release_is_compatible(release, game_version=game_version, loaders=loaders):
+            return release
+    return None
+
+
 def choose_release(releases: list[Release]) -> Release | None:
-    """Elige el fichero a instalar: Modrinth devuelve primero el mas reciente."""
+    """Elige el fichero a instalar: Modrinth devuelve primero el mas reciente.
+
+    Se conserva por compatibilidad con el codigo y las pruebas anteriores; para
+    comprobar la version o el cargador esta ``choose_compatible_release``.
+    """
     return releases[0] if releases else None
 
 
@@ -484,3 +579,38 @@ def download_release(
         on_progress=on_progress,
         should_cancel=should_cancel,
     )
+
+
+def install_release(
+    files,
+    inventory,
+    selection: ContentSelection,
+    destination: str,
+    *,
+    on_progress=None,
+    should_cancel=None,
+):
+    """Descarga una seleccion y anota de que proyecto salio.
+
+    ``inventory`` es el ``ModsInventory`` del servidor. Se guarda el proyecto
+    para que la lista de mods/plugins pueda enseñar su icono despues sin volver
+    a consultar Modrinth.
+    """
+    path = download_release(
+        files,
+        selection.release,
+        destination,
+        on_progress=on_progress,
+        should_cancel=should_cancel,
+    )
+    if inventory is not None:
+        try:
+            inventory.remember_project(
+                path.name,
+                slug=selection.project.slug,
+                title=selection.project.title,
+                icon=selection.project.icon_url,
+            )
+        except Exception as exc:  # noqa: BLE001 - anotar el icono no es critico
+            logger.warning("No se pudo anotar el proyecto de %s: %s", path.name, exc)
+    return path

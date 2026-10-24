@@ -5,31 +5,33 @@ se hacen por consola RCON, que solo responde con el servidor en marcha. La lista
 blanca y los operadores se leen ademas de los ficheros del servidor, asi que la
 pestana sigue mostrando informacion util cuando el servidor esta detenido.
 
-La pantalla esta pensada para que la entienda cualquiera, tambien un niño:
+La pantalla se organiza como una ficha de servidor:
 
-* Arriba se explica con una frase si puede entrar cualquiera o solo los
-  invitados, y hay **un boton grande** para activar o desactivar la lista blanca.
-* Los botones de cada jugador cambian segun lo que se pueda hacer: invitar,
-  quitar la invitacion, hacer administrador, bloquear o sacar del juego. Asi no
-  aparecen diez botones a la vez ni palabras tecnicas como «OP» o «whitelist».
-* El boton «?» guarda la explicacion larga para quien quiera leer mas.
-
-Desde aqui tambien se abre el **inventario** de un jugador conectado: el servidor
-lo cuenta por su consola (``data get entity``) y se enseña con la misma
-disposicion que la mochila del juego.
+* La cabecera resume de que servidor se trata.
+* «Acceso al servidor» reune la lista blanca y la invitacion rapida.
+* «Jugadores» muestra una tabla limpia, con avatares y estados en forma de
+  etiquetas, sin repetir el mismo icono en cada celda.
+* «Acciones» aparece debajo y cambia segun el jugador elegido.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QIcon
+from functools import lru_cache
+from hashlib import sha1
+
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QProgressBar,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -48,11 +50,10 @@ from ..core.players import (
     PlayerAction,
     validate_player_name,
 )
+from ..core.textures import cached_skin, fetch_skin, offline
 from .common import (
     Chip,
     FlowRow,
-    HelpButton,
-    SectionCard,
     WrappingLabel,
     hint_label,
     make_button,
@@ -62,18 +63,23 @@ from .common import (
 from .dialogs import confirm, show_error
 from .inventory_dialog import InventoryDialog
 from .mc_icons import (
-    icono_candado,
-    icono_corona,
+    bloque_bedrock,
     icono_escudo,
     icono_jugador,
+    icono_jugador_duda,
     icono_lista,
-    icono_mochila,
-    icono_no,
     icono_pase,
-    icono_salida,
-    icono_si,
+)
+from .mc_widgets import (
+    AccentCard,
+    CenteredEmpty,
+    EmptySlot,
+    IconSlot,
+    MinecraftHero,
+    TexturedPage,
 )
 from .players_manager_dialog import PlayersManagerDialog
+from .skin_view import head_pixmap
 from .tasks import TaskRunner
 
 logger = get_logger("ui.players")
@@ -81,6 +87,11 @@ logger = get_logger("ui.players")
 #: Color con el que se marca lo bueno (conectado, operador...) y lo malo (bloqueado).
 _BUENO = "#2e7d32"
 _MALO = "#b3261e"
+
+
+def _is_bedrock(name: str) -> bool:
+    """True si el nombre es de un jugador de Bedrock (Floodgate usa un punto)."""
+    return str(name or "").startswith(".")
 
 #: Texto de los botones. Se evitan las palabras tecnicas («OP», «whitelist»)
 #: salvo en las explicaciones largas, para que la pantalla se entienda sola.
@@ -92,18 +103,6 @@ _ACTION_LABELS: dict[str, str] = {
     "kick": "Sacar del juego",
     "ban": "Bloquear entrada",
     "pardon": "Quitar bloqueo",
-}
-
-#: Dibujo propio de cada accion. No se depende del tema de iconos del escritorio:
-#: asi cada boton tiene siempre su icono, tambien al ejecutar el AppImage.
-_ACTION_PIXMAPS = {
-    "op": icono_corona,
-    "deop": icono_corona,
-    "whitelist_add": icono_pase,
-    "whitelist_remove": icono_pase,
-    "kick": icono_salida,
-    "ban": icono_candado,
-    "pardon": icono_pase,
 }
 
 _ACTION_TIPS: dict[str, str] = {
@@ -132,10 +131,145 @@ _AYUDA = (
     "«Ver inventario» necesitan el servidor encendido."
     "<br><br><b>Ver inventario</b> enseña la mochila, la armadura y la barra "
     "rapida del jugador elegido. Solo funciona si esta conectado."
+    "<br><br><b>Jugadores de Bedrock</b>: Geyser les pone un punto delante del "
+    "nombre (por ejemplo «.Steve»). Es normal y se gestionan igual que los de "
+    "Java: el punto forma parte del nombre que entiende el servidor."
 )
 
 
-class PlayersPanel(QWidget):
+@lru_cache(maxsize=256)
+def _avatar(name: str, size: int = 26) -> QPixmap:
+    """Cara de respaldo mientras llega la skin real del jugador.
+
+    Se dibuja como una cabeza de Minecraft, en pixeles y sin suavizado. El
+    color del pelo se calcula a partir del nombre, de modo que cada jugador
+    tiene una cara estable y reconocible incluso sin conexion. Cuando la skin
+    esta en la cache (o termina de descargarse), ocupa su sitio.
+    """
+    limpio = (name or "?").strip() or "?"
+    digest = sha1(limpio.lower().encode("utf-8")).digest()
+    pelo = QColor.fromHsv(int(digest[0] * 360 / 255), 120, 112)
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+    unidad = size / 8.0
+
+    def celda(x: float, y: float, ancho: float, alto: float, color: str) -> None:
+        painter.fillRect(
+            QRectF(x * unidad, y * unidad, ancho * unidad, alto * unidad),
+            QColor(color),
+        )
+
+    # Marco oscuro, como la ranura de un inventario.
+    celda(0, 0, 8, 8, "#3b2a1a")
+    # Cara y pelo (el tono del pelo cambia con el nombre, sin aleatoriedad).
+    celda(1, 1, 6, 6, "#c98f66")
+    celda(1, 1, 6, 2, pelo.name())
+    celda(1, 3, 1, 1, pelo.name())
+    celda(6, 3, 1, 1, pelo.name())
+    # Ojos y boca.
+    celda(2, 4, 1, 1, "#ffffff")
+    celda(5, 4, 1, 1, "#ffffff")
+    celda(2, 4, 0.5, 0.6, "#2b4a8b")
+    celda(5.5, 4, 0.5, 0.6, "#2b4a8b")
+    celda(3, 6, 2, 0.7, "#8a5f3f")
+    painter.end()
+    return pixmap
+
+
+class _RoleBadgeDelegate(QStyledItemDelegate):
+    """Pinta las columnas de estado como etiquetas de color.
+
+    El texto real del elemento sigue siendo «Si» o «No» (la tabla se puede leer
+    y probar como antes), pero en pantalla se muestra una etiqueta corta y
+    legible: «En juego», «Invitado», «Operador» o «Bloqueado».
+    """
+
+    _LABELS = {
+        1: ("En juego", "Ausente"),
+        2: ("Invitado", "No"),
+        3: ("Operador", "Jugador"),
+        4: ("Bloqueado", "—"),
+    }
+    _COLORS = {
+        1: "#2E7D32",
+        2: "#2C739B",
+        3: "#9A7422",
+        4: "#B3261E",
+    }
+
+    def __init__(self, column: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.column = column
+
+    def _font(self, option: QStyleOptionViewItem, activo: bool) -> QFont:
+        font = QFont(option.font)
+        font.setBold(activo)
+        font.setPointSizeF(max(8.0, font.pointSizeF() - 0.5))
+        return font
+
+    def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:  # noqa: N802 - API de Qt
+        """Reserva sitio para la etiqueta, no solo para el «Si»/«No» interno."""
+        pista = super().sizeHint(option, index)
+        activo = index.data(Qt.ItemDataRole.DisplayRole) == "Si"
+        etiqueta = self._LABELS[self.column][0 if activo else 1]
+        ancho = QFontMetrics(self._font(option, activo)).horizontalAdvance(etiqueta) + 30
+        pista.setWidth(max(pista.width(), ancho))
+        return pista
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        widget = opt.widget
+        style = widget.style() if widget is not None else QApplication.style()
+
+        # Primero se deja que el estilo pinte el fondo (seleccion, filas
+        # alternas), pero sin el texto ni el icono originales.
+        opt.text = ""
+        opt.icon = QIcon()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
+
+        activo = index.data(Qt.ItemDataRole.DisplayRole) == "Si"
+        etiqueta = self._LABELS[self.column][0 if activo else 1]
+        # Solo se colorea lo que esta activo. Si no, cuatro columnas de colores
+        # a la vez convierten la tabla en un semaforo y cuesta leer lo importante.
+        color = QColor(self._COLORS[self.column] if activo else "#6B7280")
+        oscuro = opt.palette.window().color().lightness() < 128
+        if oscuro:
+            color = color.lighter(138)
+        # Sobre la fila seleccionada el fondo ya es azul: una etiqueta blanca se
+        # lee mejor que el color propio mezclado con el resaltado.
+        seleccionado = bool(opt.state & QStyle.StateFlag.State_Selected)
+        if seleccionado:
+            color = QColor("#ffffff")
+        fondo = QColor(color)
+        fondo.setAlpha(38 if seleccionado else (34 if activo else 20))
+        borde = QColor(color)
+        borde.setAlpha(150 if seleccionado else (105 if activo else 55))
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        font = self._font(opt, activo)
+        painter.setFont(font)
+        metrica = painter.fontMetrics()
+        ancho = metrica.horizontalAdvance(etiqueta) + 18
+        alto = 22
+        caja = QRectF(
+            opt.rect.left() + 6,
+            opt.rect.center().y() - alto / 2 + 1,
+            ancho,
+            alto,
+        )
+        painter.setPen(QPen(borde, 1.0))
+        painter.setBrush(fondo)
+        painter.drawRoundedRect(caja, 6.0, 6.0)
+        painter.setPen(color)
+        painter.drawText(caja, Qt.AlignmentFlag.AlignCenter, etiqueta)
+        painter.restore()
+
+
+class PlayersPanel(TexturedPage):
     """Gestiona los jugadores del servidor seleccionado."""
 
     def __init__(self, manager: ServerManager, runner: TaskRunner, parent: QWidget | None = None) -> None:
@@ -155,94 +289,88 @@ class PlayersPanel(QWidget):
         self._inventario: InventoryDialog | None = None
         #: Ventana de gestion de listas abierta.
         self._gestion: PlayersManagerDialog | None = None
+        #: Skins ya disponibles (nombre en minusculas -> PNG de 64x64), las que
+        #: se estan descargando y las que fallaron para no repetir la peticion.
+        self._skins: dict[str, bytes] = {}
+        self._skins_pendientes: set[str] = set()
+        self._skins_fallidas: set[str] = set()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setSpacing(12)
 
         layout.addWidget(self._build_hero())
         layout.addWidget(self._build_access_card())
         layout.addWidget(self._build_players_card(), 1)
 
-        self.empty = QLabel("Selecciona un servidor para ver sus jugadores.")
-        self.empty.setObjectName("EmptyState")
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty = CenteredEmpty(
+            "Elige un servidor",
+            "Selecciona uno en la lista de la izquierda para ver quien esta "
+            "jugando, invitar a tus amigos y preparar la lista blanca.",
+            pixmap=icono_jugador_duda(64),
+        )
         layout.addWidget(self.empty)
 
         self.set_server(None, running=False)
 
     # ============================================================== construccion
     def _build_hero(self) -> QWidget:
-        """Cabecera con sabor a Minecraft: bloque, titulo y explicacion corta."""
-        self.hero = QFrame()
-        self.hero.setObjectName("PlayersHero")
-        # Sin esto, Qt pinta el fondo del estilo nativo y se pierde el degradado
-        # verde de la cabecera en algunos temas (por ejemplo Breeze).
-        self.hero.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        fila = QHBoxLayout(self.hero)
-        fila.setContentsMargins(16, 12, 14, 12)
-        fila.setSpacing(12)
-
-        icono = QLabel()
-        icono.setObjectName("PlayersHeroIcon")
-        icono.setPixmap(icono_jugador(42))
-        icono.setFixedSize(44, 44)
-        fila.addWidget(icono)
-
-        textos = QVBoxLayout()
-        textos.setSpacing(1)
-        self.hero_title = QLabel("Jugadores")
-        self.hero_title.setObjectName("PlayersHeroTitle")
-        # El color se fija tambien aqui: algunos estilos nativos (Breeze) ignoran
-        # el color heredado de la hoja de estilos en las etiquetas de un QFrame.
-        self.hero_title.setStyleSheet("color: #ffffff;")
-        textos.addWidget(self.hero_title)
-        self.hero_subtitle = QLabel("Decide quien entra y que puede hacer cada uno")
-        self.hero_subtitle.setObjectName("PlayersHeroSubtitle")
-        self.hero_subtitle.setStyleSheet("color: rgba(255, 255, 255, 0.86);")
-        self.hero_subtitle.setWordWrap(True)
-        textos.addWidget(self.hero_subtitle)
-        fila.addLayout(textos, 1)
-
-        self.hero_help = HelpButton(
-            "Jugadores: quien entra y que puede hacer", _AYUDA, self.hero
-        )
-        fila.addWidget(self.hero_help, 0, Qt.AlignmentFlag.AlignTop)
-        return self.hero
-
-    def _build_access_card(self) -> SectionCard:
-        """Lista blanca: el interruptor grande y la invitacion rapida."""
-        self.card = SectionCard(
-            "Quien puede entrar",
-            pixmap=icono_escudo(18),
-            help_title="Lista blanca: invitar y bloquear jugadores",
+        """Cabecera con el mismo lenguaje visual que Detalles y Mods."""
+        self.hero = MinecraftHero(
+            "Jugadores",
+            "Decide quien entra y que puede hacer cada uno.",
+            pixmap=icono_jugador(44),
+            accent="blue",
+            help_title="Jugadores: quien entra y que puede hacer",
             help_text=_AYUDA,
         )
+        return self.hero
+
+    def _build_access_card(self) -> AccentCard:
+        """Lista blanca: el interruptor y la invitacion rapida."""
+        self.card = AccentCard(
+            "Acceso al servidor",
+            pixmap=icono_escudo(20),
+            help_title="Lista blanca: invitar y bloquear jugadores",
+            help_text=_AYUDA,
+            accent="gold",
+        )
         cuerpo = self.card.body()
+        cuerpo.setSpacing(9)
 
         # Resumen de un vistazo: cuantos hay conectados, invitados, operadores...
         self.chips = FlowRow(spacing=8)
-        self.chip_online = Chip("Conectados: ?", tone="info", pixmap=icono_jugador(14))
+        self.chip_online = Chip("Conectados: ?", tone="info")
         self.chip_whitelist = Chip("Lista blanca: ?")
         self.chip_ops = Chip("Operadores: ?")
         self.chip_banned = Chip("Bloqueados: 0", tone="bad")
-        for chip in (self.chip_online, self.chip_whitelist, self.chip_ops, self.chip_banned):
+        self.chip_bedrock = Chip(
+            "Bedrock: 0",
+            tone="info",
+            pixmap=bloque_bedrock(12),
+            tooltip="Jugadores que entran desde movil, tablet o consola con Geyser",
+        )
+        self.chip_bedrock.setVisible(False)
+        for chip in (
+            self.chip_online,
+            self.chip_whitelist,
+            self.chip_ops,
+            self.chip_banned,
+            self.chip_bedrock,
+        ):
             self.chips.add(chip)
         cuerpo.addWidget(self.chips)
 
         self.whitelist_banner = QFrame()
         self.whitelist_banner.setObjectName("WhitelistBanner")
+        self.whitelist_banner.setProperty("active", False)
         self.whitelist_banner.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        banner = QVBoxLayout(self.whitelist_banner)
-        banner.setContentsMargins(12, 8, 12, 10)
-        banner.setSpacing(8)
+        banner = QHBoxLayout(self.whitelist_banner)
+        banner.setContentsMargins(12, 10, 12, 10)
+        banner.setSpacing(10)
 
-        fila = QHBoxLayout()
-        fila.setSpacing(10)
-        escudo = QLabel()
-        escudo.setPixmap(icono_escudo(28))
-        escudo.setFixedSize(30, 30)
-        fila.addWidget(escudo)
+        self.whitelist_slot = IconSlot(icono_escudo(24), size=38, icon_size=24, parent=self.whitelist_banner)
+        banner.addWidget(self.whitelist_slot, 0, Qt.AlignmentFlag.AlignVCenter)
 
         textos = QVBoxLayout()
         textos.setSpacing(1)
@@ -253,22 +381,21 @@ class PlayersPanel(QWidget):
         self.whitelist_state.setObjectName("WhitelistState")
         self.whitelist_state.setWordWrap(True)
         textos.addWidget(self.whitelist_state)
-        fila.addLayout(textos, 1)
-        banner.addLayout(fila)
+        banner.addLayout(textos, 1)
 
-        # Boton grande y con el texto completo: se entiende de un vistazo y se
-        # puede pulsar sin apuntar a una zona pequena.
+        # Un interruptor compacto, no una barra enorme: la accion se entiende
+        # por el texto y el estado se lee en la frase de la izquierda.
         self.whitelist_button = make_button(
-            "Activar lista blanca",
+            "Activada",
             accent=True,
-            tooltip="Solo podran entrar los jugadores que invites",
+            tooltip="Pulsa para permitir la entrada a cualquiera",
         )
         self.whitelist_button.setObjectName("WhitelistToggle")
         self.whitelist_button.setCheckable(True)
-        self.whitelist_button.setMinimumHeight(40)
-        self.whitelist_button.setIcon(QIcon(icono_escudo(16)))
+        self.whitelist_button.setMinimumWidth(126)
+        self.whitelist_button.setMinimumHeight(34)
         self.whitelist_button.clicked.connect(self._on_whitelist_clicked)
-        banner.addWidget(self.whitelist_button)
+        banner.addWidget(self.whitelist_button, 0, Qt.AlignmentFlag.AlignVCenter)
         cuerpo.addWidget(self.whitelist_banner)
 
         self.whitelist_note = hint_label("")
@@ -277,14 +404,18 @@ class PlayersPanel(QWidget):
         # Invitacion rapida: escribir un nombre y pulsar un solo boton.
         # Se usa una fila que envuelve: en ventanas estrechas los controles
         # pasan a la linea siguiente en vez de recortarse.
-        self.invite_box = FlowRow(spacing=8)
+        self.invite_box = FlowRow(spacing=10)
         etiqueta = QLabel("Invitar a un amigo:")
         self.invite_box.add(etiqueta)
         self.invite_input = QLineEdit()
         self.invite_input.setPlaceholderText("Escribe su nombre de Minecraft")
         self.invite_input.setClearButtonEnabled(True)
-        self.invite_input.setMaxLength(32)
+        self.invite_input.setMaxLength(33)
         self.invite_input.setMinimumWidth(230)
+        self.invite_input.setToolTip(
+            "Escribe el nombre tal y como aparece en el juego. Los jugadores de "
+            "Bedrock llevan un punto delante (por ejemplo .Steve)."
+        )
         self.invite_input.returnPressed.connect(self._invitar)
         self.invite_box.add(self.invite_input)
 
@@ -300,9 +431,10 @@ class PlayersPanel(QWidget):
 
         self.manage_button = make_button(
             "Todas las listas...",
-            icon_names=("system-users", "preferences-system-users"),
             tooltip="Ver y cambiar invitados, bloqueados y administradores",
         )
+        self.manage_button.setObjectName("ManagePlayersButton")
+        self.manage_button.setProperty("panelRole", "list")
         self.manage_button.setIcon(QIcon(icono_lista(16)))
         self.manage_button.clicked.connect(self._abrir_gestion)
         self._action_buttons: dict[str, QWidget] = {"gestion": self.manage_button}
@@ -311,15 +443,17 @@ class PlayersPanel(QWidget):
 
         return self.card
 
-    def _build_players_card(self) -> SectionCard:
+    def _build_players_card(self) -> AccentCard:
         """Tabla de jugadores y acciones que cambian segun el elegido."""
-        self.players_card = SectionCard(
+        self.players_card = AccentCard(
             "Jugadores del servidor",
-            pixmap=icono_jugador(18),
+            pixmap=icono_lista(20),
             help_title="Acciones de cada jugador",
             help_text=_AYUDA,
+            accent="blue",
         )
         cuerpo = self.players_card.body()
+        cuerpo.setSpacing(8)
 
         # Nombre del jugador + refrescar.
         name_row = QHBoxLayout()
@@ -327,56 +461,109 @@ class PlayersPanel(QWidget):
         self.player_input = QLineEdit()
         self.player_input.setPlaceholderText("Busca o escribe el nombre de un jugador")
         self.player_input.setClearButtonEnabled(True)
-        self.player_input.setMaxLength(32)
+        self.player_input.setMaxLength(33)
+        self.player_input.setToolTip(
+            "Nombre del jugador: letras, numeros y guion bajo. Los jugadores de "
+            "Bedrock llevan un punto delante (por ejemplo .Steve)."
+        )
         self.player_input.textChanged.connect(self._on_name_changed)
         self.player_input.returnPressed.connect(self._on_op)
         name_row.addWidget(self.player_input, 1)
         self.refresh_button = make_button(
-            "Refrescar", icon_names=("view-refresh",), tooltip="Volver a leer quien esta jugando"
+            "Actualizar",
+            icon_names=("view-refresh",),
+            tooltip="Volver a leer quien esta jugando",
         )
-        self.refresh_button.setIcon(QIcon(icono_si(16)))
+        self.refresh_button.setProperty("panelRole", "stone")
         self.refresh_button.clicked.connect(self.refresh)
         name_row.addWidget(self.refresh_button)
         cuerpo.addLayout(name_row)
 
         self.table = QTableWidget(0, 5)
+        self.table.setObjectName("PlayersTable")
         self.table.setHorizontalHeaderLabels(
-            ["Jugador", "En el juego", "Invitado", "Administrador", "Bloqueado"]
+            ["Jugador", "Estado", "Acceso", "Permisos", "Bloqueo"]
         )
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self.table.horizontalHeader().setMinimumSectionSize(78)
         for column in (1, 2, 3, 4):
             self.table.horizontalHeader().setSectionResizeMode(
                 column, QHeaderView.ResizeMode.ResizeToContents
             )
+            self.table.setItemDelegateForColumn(column, _RoleBadgeDelegate(column, self.table))
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(28)
+        self.table.verticalHeader().setDefaultSectionSize(46)
+        self.table.setIconSize(QSize(28, 28))
         self.table.setAlternatingRowColors(True)
-        polish_table_header(self.table)
+        self.table.setShowGrid(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setMinimumHeight(150)
+        self.table.setMinimumHeight(190)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.doubleClicked.connect(lambda _index: self._ver_inventario())
+        polish_table_header(self.table)
         cuerpo.addWidget(self.table, 1)
 
-        self.actions_title = QLabel("Acciones del jugador elegido")
-        self.actions_title.setObjectName("SectionTitle")
-        cuerpo.addWidget(self.actions_title)
+        # Cuando no hay nadie apuntado, la tabla vacia no explica nada: debajo
+        # aparece una ranura con la cabeza desconocida y una pista.
+        self.players_empty = EmptySlot(
+            "Todavia no hay jugadores",
+            "Cuando alguien entre, este en la lista de invitados o tenga "
+            "permisos, aparecera aqui con su cabeza.",
+            pixmap=icono_jugador_duda(32),
+        )
+        self.players_empty.setVisible(False)
+        cuerpo.addWidget(self.players_empty)
 
-        # Acciones. Cada boton se muestra solo cuando tiene sentido para el
-        # jugador elegido (invitar o quitar invitacion, no las dos a la vez).
-        self.actions_row = FlowRow(spacing=8)
+        # Panel de acciones: separado de la tabla para que la ficha no parezca
+        # una lista de botones suelta.
+        self.actions_panel = QFrame()
+        self.actions_panel.setObjectName("PlayerActionsPanel")
+        self.actions_panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        acciones = QVBoxLayout(self.actions_panel)
+        acciones.setContentsMargins(12, 10, 12, 10)
+        acciones.setSpacing(9)
+
+        seleccion = QHBoxLayout()
+        seleccion.setSpacing(12)
+        self.selection_slot = IconSlot(None, size=38, icon_size=28, parent=self.actions_panel)
+        seleccion.addWidget(self.selection_slot, 0, Qt.AlignmentFlag.AlignTop)
+
+        textos = QVBoxLayout()
+        textos.setSpacing(1)
+        self.actions_title = WrappingLabel("Acciones del jugador elegido")
+        self.actions_title.setObjectName("SectionTitle")
+        textos.addWidget(self.actions_title)
+        self.actions_note = hint_label(
+            "Elige un jugador de la tabla para ver lo que puedes hacer."
+        )
+        textos.addWidget(self.actions_note)
+        self.bedrock_chip = Chip(
+            "Jugador de Bedrock",
+            tone="info",
+            pixmap=bloque_bedrock(12),
+            tooltip="Entra desde movil, tablet o consola con Geyser; el punto del "
+            "nombre lo pone Floodgate.",
+        )
+        self.bedrock_chip.setVisible(False)
+        textos.addWidget(self.bedrock_chip, 0, Qt.AlignmentFlag.AlignLeft)
+        seleccion.addLayout(textos, 1)
+        acciones.addLayout(seleccion)
+
+        self.actions_row = FlowRow(spacing=12)
         for action in PLAYER_ACTIONS:
             button = make_button(
                 _ACTION_LABELS.get(action.key, action.label),
                 danger=action.destructive,
                 tooltip=_ACTION_TIPS.get(action.key, f"Envia «{action.command}»"),
             )
-            button.setProperty("playerAction", "true")
-            pixmap = _ACTION_PIXMAPS.get(action.key)
-            if pixmap is not None:
-                button.setIcon(QIcon(pixmap(16)))
+            # Cada accion lleva su propio color en la hoja de estilos: permisos
+            # (oro), acceso (verde), sanciones (naranja/rojo) e inventario (azul).
+            button.setProperty("playerAction", action.key)
+            button.setMinimumHeight(32)
             button.clicked.connect(lambda _checked=False, a=action: self._apply(a))
             self._action_buttons[action.key] = button
             self.actions_row.add(button)
@@ -385,20 +572,18 @@ class PlayersPanel(QWidget):
             "Ver inventario",
             tooltip="Ensenar la mochila, la armadura y la barra rapida del jugador elegido",
         )
-        self.inventory_button.setIcon(QIcon(icono_mochila(16)))
+        self.inventory_button.setProperty("playerAction", "inventario")
+        self.inventory_button.setMinimumHeight(32)
         self.inventory_button.clicked.connect(self._ver_inventario)
         self._action_buttons["inventario"] = self.inventory_button
         self.actions_row.add(self.inventory_button)
-        cuerpo.addWidget(self.actions_row)
-
-        self.actions_note = hint_label("Elige un jugador de la tabla para ver lo que puedes hacer.")
-        cuerpo.addWidget(self.actions_note)
+        acciones.addWidget(self.actions_row)
 
         self.status = self._hint("")
-        cuerpo.addWidget(self.status)
+        acciones.addWidget(self.status)
 
         self.warning = hint_label("")
-        cuerpo.addWidget(self.warning)
+        acciones.addWidget(self.warning)
 
         footer = QHBoxLayout()
         self.progress = QProgressBar()
@@ -407,12 +592,94 @@ class PlayersPanel(QWidget):
         self.progress.setFixedWidth(180)
         footer.addWidget(self.progress)
         footer.addStretch(1)
-        cuerpo.addLayout(footer)
+        acciones.addLayout(footer)
+
+        cuerpo.addWidget(self.actions_panel)
         return self.players_card
 
     def _hint(self, texto: str) -> QLabel:
         etiqueta = hint_label(texto)
         return etiqueta
+
+    # =============================================================== cabezas
+    def _head_pixmap(self, name: str, size: int = 28) -> QPixmap:
+        """Cara real del jugador o, mientras no haya skin, una cabeza dibujada."""
+        datos = self._skins.get((name or "").strip().lower())
+        if datos:
+            return head_pixmap(datos, size)
+        return _avatar(name, size)
+
+    def _prepare_skins(self, names: tuple[str, ...]) -> None:
+        """Lee las skins guardadas y pide en segundo plano las que falten.
+
+        La descarga nunca bloquea la interfaz: primero se ve la cabeza dibujada
+        y, cuando llega la skin, se cambia el icono de esa fila.
+        """
+        faltan: list[str] = []
+        for name in names:
+            key = name.lower()
+            if (
+                key in self._skins
+                or key in self._skins_pendientes
+                or key in self._skins_fallidas
+            ):
+                continue
+            guardada = cached_skin(name)
+            if guardada:
+                self._skins[key] = guardada
+            else:
+                faltan.append(name)
+        if not faltan:
+            return
+        if offline():
+            # Sin conexion no se sale a internet: queda la cabeza dibujada.
+            self._skins_fallidas.update(name.lower() for name in faltan)
+            return
+        for name in faltan:
+            self._request_skin(name)
+
+    def _request_skin(self, name: str) -> None:
+        """Pide la skin de un jugador y actualiza su cabeza al recibirla."""
+        key = name.lower()
+        if key in self._skins_pendientes:
+            return
+        self._skins_pendientes.add(key)
+
+        def work(*, context) -> bytes | None:
+            return fetch_skin(name)
+
+        def done(datos: bytes | None) -> None:
+            self._skins_pendientes.discard(key)
+            if datos:
+                self._skins[key] = datos
+                self._apply_head(name)
+            else:
+                self._skins_fallidas.add(key)
+
+        def failed(_message: str, _details: str) -> None:
+            self._skins_pendientes.discard(key)
+            self._skins_fallidas.add(key)
+
+        self.runner.submit(
+            f"Skin de {name}",
+            work,
+            on_finished=done,
+            on_failed=failed,
+            track_busy=False,
+        )
+
+    def _apply_head(self, name: str) -> None:
+        """Sustituye la cabeza dibujada por la skin que acaba de llegar."""
+        icono = QIcon(self._head_pixmap(name, 28))
+        for fila in range(self.table.rowCount()):
+            item = self.table.item(fila, 0)
+            if item is None:
+                continue
+            fila_name = str(item.data(Qt.ItemDataRole.UserRole) or "")
+            if fila_name.lower() == name.lower():
+                item.setIcon(icono)
+        if self._target_name().lower() == name.lower():
+            self._update_actions()
 
     # ================================================================= API
     def set_server(self, spec: ServerSpec | None, *, running: bool = False) -> None:
@@ -427,13 +694,30 @@ class PlayersPanel(QWidget):
             self.warning.clear()
             self.warning.setVisible(False)
             self.table.setRowCount(0)
+            self.table.setMinimumHeight(190)
+            self.table.setMaximumHeight(16777215)
             self._snapshot = None
+            self.players_empty.setVisible(False)
+            self.selection_slot.set_pixmap(icono_jugador_duda(28))
+            self.selection_slot.setToolTip("Ningun jugador elegido")
             self._ocultar_inventario()
             self._cerrar_gestion()
             self._fallo_avisado = False
         self._spec = spec
         self._running = running
+        if cambio:
+            # Una accion del servidor anterior pudo dejar la barra de progreso
+            # o los botones desactivados; la ficha nueva empieza limpia.
+            self._set_busy(False)
         has_server = spec is not None
+        if has_server:
+            self.hero.set_title(f"Jugadores de «{spec.name}»")
+            self.hero.set_subtitle(
+                "Quien esta conectado, quien puede entrar y que permisos tiene cada uno."
+            )
+        else:
+            self.hero.set_title("Jugadores")
+            self.hero.set_subtitle("Selecciona un servidor para ver a sus jugadores.")
         # Se ocultan uno a uno (ademas de las tarjetas): asi una ventana sin
         # servidor no deja ningun control suelto.
         for widget in (
@@ -447,14 +731,18 @@ class PlayersPanel(QWidget):
             self.table,
             self.refresh_button,
             self.player_input,
+            self.actions_panel,
             self.actions_title,
             self.actions_row,
             self.actions_note,
+            self.bedrock_chip,
             self.status,
             self.warning,
         ):
             widget.setVisible(has_server)
         self.empty.setVisible(not has_server)
+        if has_server:
+            self.bedrock_chip.setVisible(_is_bedrock(self._target_name()))
         # Solo se consulta cuando hay algo nuevo que contar: el refresco
         # periodico de la ventana llamaba a esta funcion cada pocos segundos y
         # las consultas al RCON (con su espera) se acumulaban hasta dejar la
@@ -477,17 +765,23 @@ class PlayersPanel(QWidget):
         def done(snapshot: PlayersSnapshot) -> None:
             self._consultando = False
             if self._spec is None or self._spec.id != server_id:
+                # Se cambio de servidor mientras respondia el anterior. Su
+                # consulta dejo la bandera ocupada, asi que hay que lanzar la
+                # del servidor que esta seleccionado ahora.
+                self.refresh()
                 return
             self._fallo_avisado = False
             self._on_snapshot(snapshot)
 
         def failed(message: str, details: str) -> None:
             self._consultando = False
+            if self._spec is None or self._spec.id != server_id:
+                self.refresh()
+                return
             if not self._fallo_avisado:
                 logger.warning("No se pudieron consultar los jugadores: %s", message)
                 self._fallo_avisado = True
-            if self._spec is not None and self._spec.id == server_id:
-                self.status.setText(f"No se pudieron consultar los jugadores: {message}")
+            self.status.setText(f"No se pudieron consultar los jugadores: {message}")
 
         def progress(message: str) -> None:
             if self._spec is not None and self._spec.id == server_id:
@@ -504,15 +798,17 @@ class PlayersPanel(QWidget):
 
     def _on_snapshot(self, snapshot: PlayersSnapshot) -> None:
         self._snapshot = snapshot
+        # Primero se recuperan las skins ya guardadas: la tabla nace con la
+        # cara correcta y solo las que falten se piden en segundo plano.
+        self._prepare_skins(snapshot.known)
         self.table.setRowCount(0)
         for name in snapshot.known:
             fila = self.table.rowCount()
             self.table.insertRow(fila)
             conectado = snapshot.is_online(name)
             bloqueado = snapshot.is_banned(name)
-            item = QTableWidgetItem(name)
+            item = QTableWidgetItem(QIcon(self._head_pixmap(name, 28)), name)
             item.setData(Qt.ItemDataRole.UserRole, name)
-            item.setIcon(QIcon(icono_jugador(16)))
             if conectado:
                 fuente = QFont(item.font())
                 fuente.setBold(True)
@@ -526,39 +822,40 @@ class PlayersPanel(QWidget):
                 + (" · invitado" if snapshot.in_whitelist(name) else "")
                 + (" · administrador" if snapshot.is_op(name) else "")
                 + (" · bloqueado" if bloqueado else "")
+                + (
+                    " · jugador de Bedrock (Geyser) — el punto forma parte del nombre"
+                    if _is_bedrock(name)
+                    else ""
+                )
             )
             self.table.setItem(fila, 0, item)
-            self.table.setItem(
-                fila, 1, self._celda(conectado, bueno=True, activo_pixmap=icono_si)
-            )
-            self.table.setItem(
-                fila, 2, self._celda(snapshot.in_whitelist(name), bueno=True, activo_pixmap=icono_pase)
-            )
-            self.table.setItem(
-                fila, 3, self._celda(snapshot.is_op(name), bueno=True, activo_pixmap=icono_corona)
-            )
-            self.table.setItem(
-                fila, 4, self._celda(bloqueado, bueno=False, activo_pixmap=icono_candado)
-            )
+            self.table.setItem(fila, 1, self._celda(conectado))
+            self.table.setItem(fila, 2, self._celda(snapshot.in_whitelist(name)))
+            self.table.setItem(fila, 3, self._celda(snapshot.is_op(name)))
+            self.table.setItem(fila, 4, self._celda(bloqueado))
         self._actualizar_chips(snapshot)
         self.status.setText(self._summary(snapshot))
         self.warning.setText(snapshot.note)
         self.warning.setVisible(bool(snapshot.note))
+        # Sin jugadores la tabla se queda solo con la cabecera: una tabla vacia
+        # y alta parece un fallo de carga y empuja las acciones fuera de vista.
+        if snapshot.known:
+            self.table.setMinimumHeight(190)
+            self.table.setMaximumHeight(16777215)
+        else:
+            self.table.setMinimumHeight(0)
+            self.table.setMaximumHeight(52)
+        self.players_empty.setVisible(not snapshot.known and self._spec is not None)
         if snapshot.known:
             self.table.selectRow(0)
         self._update_actions()
 
     @staticmethod
-    def _celda(activo: bool, *, bueno: bool, activo_pixmap=None) -> QTableWidgetItem:
-        """Casilla «Si»/«No» de la tabla, con icono y color."""
+    def _celda(activo: bool) -> QTableWidgetItem:
+        """Casilla «Si»/«No»; el delegado la pinta como etiqueta de color."""
         celda = QTableWidgetItem("Si" if activo else "No")
         celda.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        if activo:
-            celda.setForeground(QColor(_BUENO if bueno else _MALO))
-            pixmap = activo_pixmap(14) if activo_pixmap is not None else icono_si(14)
-        else:
-            pixmap = icono_no(14)
-        celda.setIcon(QIcon(pixmap))
+        celda.setToolTip("Si" if activo else "No")
         return celda
 
     def _actualizar_chips(self, snapshot: PlayersSnapshot) -> None:
@@ -578,15 +875,20 @@ class PlayersPanel(QWidget):
         self.chip_ops.set_text(f"Operadores: {len(snapshot.ops)}")
         self.chip_banned.set_text(f"Bloqueados: {len(snapshot.banned)}")
         self.chip_banned.setVisible(bool(snapshot.banned))
+        bedrock = sum(1 for name in snapshot.known if _is_bedrock(name))
+        self.chip_bedrock.set_text(f"Bedrock: {bedrock}")
+        self.chip_bedrock.setVisible(bool(bedrock))
         self._actualizar_lista_blanca(snapshot.whitelist_enabled)
 
     def _actualizar_lista_blanca(self, activada: bool) -> None:
-        """Pinta el estado de la lista blanca y el boton grande de encender/apagar."""
+        """Pinta el estado de la lista blanca y el interruptor."""
+        self.whitelist_banner.setProperty("active", activada)
+        estilo = self.whitelist_banner.style()
+        estilo.unpolish(self.whitelist_banner)
+        estilo.polish(self.whitelist_banner)
         self.whitelist_button.blockSignals(True)
         self.whitelist_button.setChecked(activada)
-        self.whitelist_button.setText(
-            "Desactivar lista blanca" if activada else "Activar lista blanca"
-        )
+        self.whitelist_button.setText("Activada" if activada else "Desactivada")
         self.whitelist_button.blockSignals(False)
         self.whitelist_button.setToolTip(
             "Ahora solo entran los invitados. Pulsa para permitir la entrada a cualquiera."
@@ -594,13 +896,12 @@ class PlayersPanel(QWidget):
             else "Ahora puede entrar cualquiera. Pulsa para que solo entren los invitados."
         )
         if activada:
-            self.whitelist_state.setText("Activada: solo entran los amigos que invites.")
+            self.whitelist_state.setText("Solo entran los amigos que invites.")
             self.whitelist_note.setText(
-                "Solo pueden entrar los jugadores de la lista. Si un amigo no aparece, "
-                "invitalo con el campo de abajo."
+                "La lista esta activada. Si un amigo no aparece, invitalo con el campo de abajo."
             )
         else:
-            self.whitelist_state.setText("Desactivada: puede entrar cualquiera que tenga la direccion.")
+            self.whitelist_state.setText("Puede entrar cualquiera que tenga la direccion.")
             self.whitelist_note.setText(
                 "La lista blanca esta apagada. Activala para jugar solo con tus amigos."
             )
@@ -688,6 +989,7 @@ class PlayersPanel(QWidget):
             return
 
         spec = self._spec
+        server_id = spec.id
         self._set_busy(True, f"Aplicando «{_ACTION_LABELS.get(action.key, action.label)}» a {player}...")
 
         def work(*, context) -> str:
@@ -695,6 +997,8 @@ class PlayersPanel(QWidget):
             return self.manager.run_player_action(spec.id, action.key, player)
 
         def done(response: str) -> None:
+            if self._spec is None or self._spec.id != server_id:
+                return
             self._set_busy(False)
             if limpiar_invitacion:
                 self.invite_input.clear()
@@ -703,6 +1007,8 @@ class PlayersPanel(QWidget):
             self.refresh()
 
         def failed(message: str, details: str) -> None:
+            if self._spec is None or self._spec.id != server_id:
+                return
             self._set_busy(False)
             show_error(self, "No se pudo aplicar la accion", message, details)
 
@@ -721,7 +1027,7 @@ class PlayersPanel(QWidget):
 
     # ============================================================ lista blanca
     def _on_whitelist_clicked(self) -> None:
-        """Enciende o apaga la lista blanca con el boton grande."""
+        """Enciende o apaga la lista blanca con el interruptor."""
         if self._spec is None:
             return
         activar = self.whitelist_button.isChecked()
@@ -739,6 +1045,7 @@ class PlayersPanel(QWidget):
             return
 
         spec = self._spec
+        server_id = spec.id
         self.whitelist_button.setEnabled(False)
         self.status.setText(
             "Activando la lista blanca..." if activar else "Desactivando la lista blanca..."
@@ -749,6 +1056,8 @@ class PlayersPanel(QWidget):
             return self.manager.set_whitelist_enabled(spec.id, activar)
 
         def done(_valor: bool) -> None:
+            if self._spec is None or self._spec.id != server_id:
+                return
             self.whitelist_button.setEnabled(True)
             self.status.setText(
                 "Listo: solo entran los invitados."
@@ -758,6 +1067,8 @@ class PlayersPanel(QWidget):
             self.refresh()
 
         def failed(message: str, details: str) -> None:
+            if self._spec is None or self._spec.id != server_id:
+                return
             self.whitelist_button.setEnabled(True)
             # Se devuelve el boton al estado que tenia el servidor.
             if self._snapshot is not None:
@@ -819,6 +1130,7 @@ class PlayersPanel(QWidget):
             )
             return
         spec = self._spec
+        server_id = spec.id
         self._set_busy(True, f"Leyendo el inventario de {player}...")
 
         def work(*, context) -> PlayerInventory:
@@ -826,6 +1138,8 @@ class PlayersPanel(QWidget):
             return self.manager.player_inventory(spec.id, player)
 
         def done(inventario: PlayerInventory) -> None:
+            if self._spec is None or self._spec.id != server_id:
+                return
             self._set_busy(False)
             self.status.setText(
                 f"«{player}» lleva {plural(inventario.total_items, 'objeto', 'objetos')} "
@@ -834,6 +1148,8 @@ class PlayersPanel(QWidget):
             self._mostrar_inventario(inventario)
 
         def failed(message: str, details: str) -> None:
+            if self._spec is None or self._spec.id != server_id:
+                return
             self._set_busy(False)
             show_error(self, "No se pudo leer el inventario", message, details)
 
@@ -913,11 +1229,29 @@ class PlayersPanel(QWidget):
             button.setVisible(visibles.get(key, hay_jugador))
 
         if name:
+            self.selection_slot.set_pixmap(self._head_pixmap(name, 28))
+            self.selection_slot.setToolTip(f"Cabeza de {name}")
+        else:
+            # Sin jugador elegido no se deja una ranura vacia: se muestra la
+            # cabeza con el signo de duda, que invita a elegir una fila.
+            self.selection_slot.set_pixmap(icono_jugador_duda(28))
+            self.selection_slot.setToolTip("Ningun jugador elegido")
+        es_bedrock = _is_bedrock(name)
+        self.bedrock_chip.setVisible(bool(name) and es_bedrock)
+        if name:
             self.actions_title.setText(f"Acciones para «{name}»")
-            self.actions_note.setText(
-                "Los cambios se aplican al momento con el servidor encendido; con el "
-                "servidor detenido se guardan para el proximo arranque."
-            )
+            if es_bedrock:
+                self.actions_note.setText(
+                    "Es un jugador de Bedrock (movil, tablet o consola): Geyser le pone "
+                    "un punto delante del nombre y se gestiona igual que los de Java. "
+                    "Los cambios se aplican al momento con el servidor encendido; con "
+                    "el servidor detenido se guardan para el proximo arranque."
+                )
+            else:
+                self.actions_note.setText(
+                    "Los cambios se aplican al momento con el servidor encendido; con el "
+                    "servidor detenido se guardan para el proximo arranque."
+                )
         else:
             self.actions_title.setText("Acciones del jugador elegido")
             self.actions_note.setText(

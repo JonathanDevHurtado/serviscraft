@@ -1,27 +1,35 @@
 """Panel de consola: registro en tiempo real y envio de comandos.
 
 Se parece a la consola de verdad, pero pensada para no perderse: el estado del
-servidor se ve en un punto de color, las lineas importantes van coloreadas (con
-su leyenda al lado) y hay un filtro para quedarse solo con los problemas cuando
-algo va mal.
+servidor se ve en una tira de estado, las lineas importantes van coloreadas (con
+su leyenda en la cabecera del terminal) y hay un filtro para quedarse solo con
+lo que interesa cuando algo va mal.
 """
 
 from __future__ import annotations
 
 import re
-from html import escape
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QTimer, Signal
-from PySide6.QtGui import QFontDatabase, QIcon, QKeyEvent, QTextCursor
+from PySide6.QtGui import (
+    QColor,
+    QFontDatabase,
+    QKeyEvent,
+    QPalette,
+    QTextCharFormat,
+    QTextCursor,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -30,8 +38,9 @@ from ..core.errors import ServiscraftError
 from ..core.logging_setup import get_logger
 from ..core.manager import ServerManager
 from ..core.models import ServerSpec, ServerState
-from .common import ElidedLabel, FlowRow, SectionCard, WrappingLabel, hint_label, make_button
+from .common import ElidedLabel, FlowRow, WrappingLabel, hint_label, make_button
 from .mc_icons import icono_consola, punto_estado
+from .mc_widgets import AccentCard, TexturedPage
 from .tasks import TaskRunner
 
 logger = get_logger("ui.console")
@@ -80,9 +89,11 @@ _AYUDA = (
     "ordenes que en un servidor de verdad."
     "<br><br>· <b>Seguir en vivo</b>: la consola se actualiza sola, sin pulsar "
     "nada. Si lo desactivas, deja de traer lineas nuevas."
-    "<br>· <b>Desplazamiento automatico</b>: baja solo hasta la ultima linea."
+    "<br>· <b>Desplazarse solo</b>: baja hasta la ultima linea con cada mensaje."
     "<br>· <b>Solo problemas</b>: esconde lo normal y deja los avisos y los "
     "errores, para encontrar el fallo rapido."
+    "<br>· <b>Filtrar</b>: escribe un nombre, una palabra o «ERROR» y la consola "
+    "muestra solo las lineas que coinciden."
     "<br>· <b>Comandos...</b>: atajos de las ordenes mas usadas (por ejemplo "
     "<i>list</i> para ver quien esta jugando, o <i>stop</i> para parar el servidor "
     "guardando el mundo)."
@@ -91,13 +102,14 @@ _AYUDA = (
 )
 
 
-class ConsolePanel(QWidget):
+class ConsolePanel(TexturedPage):
     """Consola del servidor seleccionado."""
 
     command_sent = Signal()
 
     def __init__(self, manager: ServerManager, runner: TaskRunner, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("ConsolePanel")
         self.manager = manager
         self.runner = runner
         self._spec: ServerSpec | None = None
@@ -111,42 +123,87 @@ class ConsolePanel(QWidget):
         self._follow = True
         #: Lineas recibidas (para poder volver a pintarlas al cambiar el filtro).
         self._lines: list[str] = []
-        #: Lineas escondidas por el filtro «Solo problemas».
+        #: Lineas escondidas por los filtros.
         self._hidden = 0
+        #: Lineas que se estan viendo ahora mismo.
+        self._visible = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setSpacing(10)
 
-        self.card = SectionCard(
+        self.card = AccentCard(
             "Consola del servidor",
-            pixmap=icono_consola(18),
+            pixmap=icono_consola(20),
             help_title="La consola: para que sirve y como se usa",
             help_text=_AYUDA,
+            accent="brown",
         )
         cuerpo = self.card.body()
+        cuerpo.setSpacing(8)
 
-        # ---------------------------------------------------------- barra superior
-        # El resumen de estado va en su propia linea: asi siempre se lee entero
-        # (se recorta con puntos suspensivos si falta sitio) y los botones tienen
-        # toda la linea siguiente para ellos, donde se envuelven si no caben.
-        estado = QHBoxLayout()
-        estado.setSpacing(6)
+        # ------------------------------------------------------ tira de estado
+        # Va en su propia banda oscura, como la barra de un terminal: el estado
+        # se lee de un vistazo y no compite con los botones.
+        self.status_bar = QFrame()
+        self.status_bar.setObjectName("ConsoleStatusBar")
+        self.status_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        estado = QHBoxLayout(self.status_bar)
+        estado.setContentsMargins(10, 7, 10, 7)
+        estado.setSpacing(8)
+
         self.state_dot = QLabel()
         self.state_dot.setFixedSize(12, 12)
         self.state_dot.setPixmap(punto_estado("#6b7280"))
         estado.addWidget(self.state_dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.status_label = ElidedLabel("Sin servidor seleccionado")
-        self.status_label.setObjectName("Hint")
-        estado.addWidget(self.status_label, 1)
-        cuerpo.addLayout(estado)
 
-        # La casilla y los botones van en una fila que se envuelve cuando la
-        # ventana se estrecha.
-        self.console_actions = FlowRow()
-        self.autoscroll = QCheckBox("Desplazamiento automatico")
-        self.autoscroll.setChecked(True)
-        self.console_actions.add(self.autoscroll)
+        self.state_badge = QLabel("SIN SERVIDOR")
+        self.state_badge.setObjectName("ConsoleStateBadge")
+        self.state_badge.setProperty("tone", "none")
+        self.state_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.state_badge.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        estado.addWidget(self.state_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.status_label = ElidedLabel("Sin servidor seleccionado")
+        self.status_label.setObjectName("ConsoleStatusText")
+        estado.addWidget(self.status_label, 1)
+
+        self.line_count = QLabel("0 lineas")
+        self.line_count.setObjectName("ConsoleCounter")
+        self.line_count.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        estado.addWidget(self.line_count, 0, Qt.AlignmentFlag.AlignVCenter)
+        cuerpo.addWidget(self.status_bar)
+
+        # ---------------------------------------------------------- herramientas
+        self.toolbar = QFrame()
+        self.toolbar.setObjectName("ConsoleToolbar")
+        self.toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        herramientas = QVBoxLayout(self.toolbar)
+        herramientas.setContentsMargins(9, 7, 9, 7)
+        herramientas.setSpacing(6)
+
+        # Una sola fila que se envuelve cuando la ventana se estrecha.
+        self.console_actions = FlowRow(spacing=8)
+
+        self.filter_input = QLineEdit()
+        self.filter_input.setObjectName("ConsoleFilter")
+        self.filter_input.setPlaceholderText("Filtrar lineas: nombre, texto o ERROR...")
+        self.filter_input.setClearButtonEnabled(True)
+        self.filter_input.setMinimumWidth(170)
+        self.filter_input.setToolTip(
+            "Muestra solo las lineas que contienen este texto. Se aplica junto a "
+            "«Solo problemas»."
+        )
+        self.console_actions.add(self.filter_input)
+        # La busqueda espera a que se deje de escribir: repintar 6000 lineas en
+        # cada tecla haria que la consola fuera a tirones.
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(220)
+        self._filter_timer.timeout.connect(self._on_filter_changed)
+        self.filter_input.textChanged.connect(lambda _texto: self._filter_timer.start())
 
         self.follow_button = make_button(
             "Seguir en vivo",
@@ -165,6 +222,11 @@ class ConsolePanel(QWidget):
         self.only_problems.toggled.connect(self._on_filter_toggled)
         self.console_actions.add(self.only_problems)
 
+        self.autoscroll = QCheckBox("Desplazarse solo")
+        self.autoscroll.setChecked(True)
+        self.autoscroll.setToolTip("Bajar hasta la ultima linea con cada mensaje")
+        self.console_actions.add(self.autoscroll)
+
         clear_button = make_button(
             "Limpiar",
             icon_names=("edit-clear", "edit-clear-history"),
@@ -182,65 +244,112 @@ class ConsolePanel(QWidget):
         self.console_actions.add(copy_button)
 
         save_button = make_button(
-            "Guardar registro",
+            "Guardar...",
             icon_names=("document-save", "document-save-as"),
             tooltip="Guardar la consola en un fichero de texto",
         )
         save_button.clicked.connect(self._save_log)
         self.console_actions.add(save_button)
-        cuerpo.addWidget(self.console_actions)
+        herramientas.addWidget(self.console_actions)
+        cuerpo.addWidget(self.toolbar)
 
-        # Leyenda de colores: la consola se entiende sin manual. Va en una sola
-        # linea ajustable (no en fichas) para no robarle alto al registro, que es
-        # lo que de verdad se mira.
+        # ------------------------------------------------------------- terminal
+        self.terminal = QFrame()
+        self.terminal.setObjectName("ConsoleTerminal")
+        self.terminal.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        terminal = QVBoxLayout(self.terminal)
+        terminal.setContentsMargins(0, 0, 0, 0)
+        terminal.setSpacing(0)
+
+        self.terminal_bar = QFrame()
+        self.terminal_bar.setObjectName("ConsoleTerminalBar")
+        self.terminal_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        barra = QHBoxLayout(self.terminal_bar)
+        barra.setContentsMargins(10, 5, 10, 5)
+        barra.setSpacing(12)
+
+        titulo = ElidedLabel("REGISTRO DEL SERVIDOR")
+        titulo.setObjectName("ConsoleTerminalTitle")
+        barra.addWidget(titulo, 1)
+
+        # La leyenda vive en la cabecera del terminal: explica los colores sin
+        # robarle una linea entera al registro.
         self.legend = WrappingLabel(_LEYENDA)
-        # La leyenda si lleva formato propio (los cuadraditos de color); el
-        # resto de textos de la consola se pintan siempre en plano.
         self.legend.setTextFormat(Qt.TextFormat.RichText)
         self.legend.setText(_LEYENDA)
-        self.legend.setObjectName("Hint")
-        cuerpo.addWidget(self.legend)
+        self.legend.setObjectName("ConsoleLegend")
+        self.legend.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.legend.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
+        )
+        barra.addWidget(self.legend, 0)
+        terminal.addWidget(self.terminal_bar)
 
-        # ----------------------------------------------------------------- salida
         self.output = QPlainTextEdit()
         self.output.setObjectName("ConsoleOutput")
         self.output.setReadOnly(True)
         self.output.setMaximumBlockCount(MAX_LINES)
         self.output.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.output.setMinimumHeight(180)
+        self.output.setPlaceholderText(
+            "La consola aparecera aqui en cuanto el servidor escriba algo."
+        )
         font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self.output.setFont(font)
-        cuerpo.addWidget(self.output, 1)
+        paleta = self.output.palette()
+        paleta.setColor(QPalette.ColorRole.PlaceholderText, QColor("#727a86"))
+        self.output.setPalette(paleta)
+        terminal.addWidget(self.output, 1)
 
-        # ---------------------------------------------------------------- entrada
-        entry = QHBoxLayout()
-        entry.setSpacing(8)
+        command_bar = QFrame()
+        command_bar.setObjectName("ConsoleCommandBar")
+        command_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        entrada = QHBoxLayout(command_bar)
+        entrada.setContentsMargins(10, 8, 10, 8)
+        # Con la barra lateral a la vista el terminal puede quedarse muy
+        # estrecho: el hueco se reparte sin recortar el boton de enviar.
+        entrada.setSpacing(6)
+
+        prompt = QLabel("$")
+        prompt.setObjectName("ConsolePrompt")
+        entrada.addWidget(prompt, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.input = QLineEdit()
         self.input.setObjectName("ConsoleInput")
         self.input.setPlaceholderText("Escribe un comando y pulsa Intro (por ejemplo: list)")
+        self.input.setMinimumWidth(90)
         self.input.returnPressed.connect(self._send)
         self.input.installEventFilter(self)
-        entry.addWidget(self.input, 1)
+        paleta_entrada = self.input.palette()
+        paleta_entrada.setColor(QPalette.ColorRole.PlaceholderText, QColor("#7b838f"))
+        self.input.setPalette(paleta_entrada)
+        entrada.addWidget(self.input, 1)
 
         self.quick = QComboBox()
         self.quick.setToolTip("Comandos frecuentes, con lo que hace cada uno")
+        self.quick.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.quick.setMinimumContentsLength(6)
         self.quick.addItem("Comandos...", "")
         for command, description in QUICK_COMMANDS:
             self.quick.addItem(command, command)
             self.quick.setItemData(self.quick.count() - 1, description, Qt.ItemDataRole.ToolTipRole)
         self.quick.activated.connect(self._use_quick_command)
-        entry.addWidget(self.quick)
+        entrada.addWidget(self.quick)
 
         self.send_button = make_button(
             "Enviar",
-            icon_names=("document-send", "go-next"),
             accent=True,
             tooltip="Enviar el comando al servidor",
         )
-        self.send_button.setIcon(QIcon.fromTheme("document-send"))
         self.send_button.clicked.connect(self._send)
-        entry.addWidget(self.send_button)
-        cuerpo.addLayout(entry)
+        entrada.addWidget(self.send_button)
+
+        terminal.addWidget(command_bar)
+        cuerpo.addWidget(self.terminal, 1)
 
         self.hint = hint_label(
             "Los comandos se envian a la consola del servidor por RCON en el bucle local "
@@ -261,9 +370,12 @@ class ConsolePanel(QWidget):
         if changed:
             self._lines.clear()
             self._hidden = 0
+            self._visible = 0
             self.output.clear()
             self._history.clear()
             self._history_index = 0
+            self.filter_input.clear()
+            self._update_counts()
         self.refresh_state(state)
 
     def refresh_state(self, state: ServerState) -> None:
@@ -273,25 +385,69 @@ class ConsolePanel(QWidget):
         self.input.setEnabled(running and self._spec is not None)
         self.send_button.setEnabled(running and self._spec is not None)
         self.quick.setEnabled(running and self._spec is not None)
-        self.state_dot.setPixmap(punto_estado("#2e7d32" if running else "#6b7280"))
+        self.state_dot.setPixmap(
+            punto_estado(
+                "#2e7d32" if running and self._follow else "#b45309" if running else "#6b7280"
+            )
+        )
         if self._spec is None:
             base = "Sin servidor seleccionado"
+            self._set_badge("SIN SERVIDOR", "none")
+        elif running and not self._follow:
+            base = f"Consola de «{self._spec.name}» — en pausa (pulsa «Seguir en vivo»)"
+            self._set_badge("EN PAUSA", "paused")
         elif running:
             base = f"Consola de «{self._spec.name}» — en directo"
+            self._set_badge("EN VIVO", "running")
         else:
             base = (
                 f"Consola de «{self._spec.name}» — servidor detenido "
                 "(se muestran los ultimos mensajes)"
             )
+            self._set_badge("DETENIDO", "stopped")
         self.status_label.setText(base + self._filtro_nota())
+
+    def _set_badge(self, text: str, tone: str) -> None:
+        """Cambia la etiqueta de estado y su color sin repintar si no hace falta."""
+        if self.state_badge.text() == text and self.state_badge.property("tone") == tone:
+            return
+        self.state_badge.setText(text)
+        self.state_badge.setProperty("tone", tone)
+        estilo = self.state_badge.style()
+        estilo.unpolish(self.state_badge)
+        estilo.polish(self.state_badge)
 
     def _filtro_nota(self) -> str:
         """Aviso que acompana al estado cuando hay lineas escondidas."""
-        if not self.only_problems.isChecked():
+        partes: list[str] = []
+        if self.only_problems.isChecked():
+            if self._hidden:
+                partes.append(f"solo problemas ({self._hidden} lineas ocultas)")
+            else:
+                partes.append("solo problemas")
+        needle = self.filter_input.text().strip()
+        if needle:
+            total = len(self._lines)
+            partes.append(f"filtro «{needle}» ({self._visible} de {total})")
+        if not partes:
             return ""
-        if not self._hidden:
-            return " · solo problemas"
-        return f" · solo problemas ({self._hidden} lineas ocultas)"
+        return " · " + " · ".join(partes)
+
+    def _update_counts(self) -> None:
+        """Resume cuantas lineas se ven y cuantas hay en total."""
+        total = len(self._lines)
+        visibles = self._visible
+        if not total:
+            texto = "0 lineas"
+        elif visibles == total:
+            texto = "1 linea" if total == 1 else f"{total} lineas"
+        else:
+            texto = f"{visibles} de {total} lineas"
+        self.line_count.setText(texto)
+        if self._hidden:
+            self.line_count.setToolTip(f"{self._hidden} lineas ocultas por los filtros")
+        else:
+            self.line_count.setToolTip("Lineas que se estan mostrando en la consola")
 
     def load_history(self) -> None:
         """Carga las ultimas lineas del registro del contenedor."""
@@ -384,47 +540,100 @@ class ConsolePanel(QWidget):
                 "Seguimiento en vivo desactivado. Pulsa para volver a ver la consola en directo."
             )
             self.stop_stream()
+        self.refresh_state(self._state)
 
     # ================================================================== salida
     def _append(self, line: str) -> None:
         """Anade una linea al registro (y a la pantalla, si pasa el filtro)."""
         self._lines.append(line)
         if len(self._lines) > MAX_LINES:
-            del self._lines[: len(self._lines) - MAX_LINES]
+            # Al recortar tambien hay que descontar las lineas retiradas: si no,
+            # el contador sigue sumando las que ya no se conservan (y deja de
+            # cuadrar con lo que muestra el terminal).
+            sobrante = len(self._lines) - MAX_LINES
+            visibles_retiradas = 0
+            for vieja in self._lines[:sobrante]:
+                if self._pasa_filtro(vieja):
+                    self._visible = max(0, self._visible - 1)
+                    visibles_retiradas += 1
+                else:
+                    self._hidden = max(0, self._hidden - 1)
+            # El terminal solo guarda las lineas visibles, asi que las que se
+            # van del historial y estaban a la vista hay que quitarlas tambien
+            # del texto: si no, quedarian ahi aunque ya no existan.
+            self._quitar_primeros_bloques(visibles_retiradas)
+            del self._lines[:sobrante]
         if self._pasa_filtro(line):
             self._paint(line)
         else:
             self._hidden += 1
+        self._update_counts()
+
+    def _quitar_primeros_bloques(self, cantidad: int) -> None:
+        """Elimina del terminal las primeras ``cantidad`` lineas visibles.
+
+        ``QPlainTextEdit`` solo recorta solo cuando supera su limite de bloques;
+        con filtros activos puede quedarse por debajo y conservar texto viejo.
+        """
+        if cantidad <= 0:
+            return
+        if cantidad >= self.output.blockCount():
+            self.output.clear()
+            return
+        cursor = QTextCursor(self.output.document())
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        for _ in range(cantidad):
+            cursor.movePosition(
+                QTextCursor.MoveOperation.NextBlock,
+                QTextCursor.MoveMode.KeepAnchor,
+            )
+        cursor.removeSelectedText()
 
     def _pasa_filtro(self, line: str) -> bool:
-        """Con «Solo problemas» se conservan avisos, errores y lo nuestro."""
-        if not self.only_problems.isChecked():
-            return True
-        if line.startswith("[Serviscraft]") or line.startswith("> "):
-            return True
-        return bool(_ERROR_RE.search(line) or _WARN_RE.search(line))
+        """Aplica «Solo problemas» y el texto del campo de filtro."""
+        if self.only_problems.isChecked():
+            if not (
+                line.startswith("[Serviscraft]")
+                or line.startswith("> ")
+                or _ERROR_RE.search(line)
+                or _WARN_RE.search(line)
+            ):
+                return False
+        needle = self.filter_input.text().strip()
+        if needle and needle.casefold() not in line.casefold():
+            return False
+        return True
 
     def _paint(self, line: str) -> None:
-        if not line.strip():
-            self.output.appendPlainText("")
-            return
-        color = self._color_for(line)
-        self.output.appendHtml(
-            f'<span style="color:{color};font-family:monospace">{_preserve_indent(escape(line))}</span>'
-        )
+        primero = self._visible == 0
+        self._visible += 1
+        # Se inserta con formato de caracteres en vez de HTML: el texto se pinta
+        # una sola vez y conserva los espacios de las trazas de error.
+        cursor = self.output.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        if not primero:
+            cursor.insertBlock()
+        formato = QTextCharFormat()
+        formato.setForeground(QColor(self._color_for(line)))
+        cursor.insertText(line, formato)
         if self.autoscroll.isChecked():
-            self.output.moveCursor(QTextCursor.MoveOperation.End)
+            self.output.setTextCursor(cursor)
 
     def _render(self) -> None:
-        """Vuelve a pintar todo (al cambiar el filtro)."""
+        """Vuelve a pintar todo (al cambiar cualquier filtro)."""
         self.output.clear()
         self._hidden = 0
+        self._visible = 0
         for line in self._lines:
             if self._pasa_filtro(line):
                 self._paint(line)
             else:
                 self._hidden += 1
+        self._update_counts()
         self.refresh_state(self._state)
+
+    def _on_filter_changed(self) -> None:
+        self._render()
 
     def _on_filter_toggled(self, _activo: bool) -> None:
         self._render()
@@ -433,7 +642,9 @@ class ConsolePanel(QWidget):
         """Vacia la consola en pantalla (sin tocar el servidor)."""
         self._lines.clear()
         self._hidden = 0
+        self._visible = 0
         self.output.clear()
+        self._update_counts()
         self.refresh_state(self._state)
 
     @staticmethod
@@ -471,11 +682,21 @@ class ConsolePanel(QWidget):
             context.progress("Enviando comando...")
             return self.manager.send_command(spec.id, command)
 
+        # Si el usuario cambia de servidor mientras se envia el comando, la
+        # respuesta no debe aparecer en la consola del servidor nuevo.
+        def done(response: str) -> None:
+            if self._spec is not None and self._spec.id == spec.id:
+                self._on_command_response(response)
+
+        def failed(message: str, details: str) -> None:
+            if self._spec is not None and self._spec.id == spec.id:
+                self._on_command_failed(message, details)
+
         self.runner.submit(
             f"Comando «{command}»",
             work,
-            on_finished=lambda response: self._on_command_response(response),
-            on_failed=self._on_command_failed,
+            on_finished=done,
+            on_failed=failed,
         )
         self.command_sent.emit()
 
@@ -547,12 +768,3 @@ class ConsolePanel(QWidget):
     # =================================================================== cierre
     def shutdown(self) -> None:
         self.stop_stream()
-
-
-def _preserve_indent(text: str) -> str:
-    """Convierte la indentacion inicial (trazas de error) en espacios duros."""
-    match = re.match(r"^[ \t]+", text)
-    if not match:
-        return text
-    prefix = match.group(0).replace("\t", "    ").replace(" ", "&nbsp;")
-    return prefix + text[len(match.group(0)) :]

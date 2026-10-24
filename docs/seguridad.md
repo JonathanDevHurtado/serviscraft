@@ -96,8 +96,9 @@ Toda la entrada del usuario se valida antes de usarse:
   línea, con longitud limitada.
 - **Acciones sobre jugadores**: no se escribe ningún comando a mano; el panel de
   jugadores usa una lista cerrada de órdenes y el nombre pasa antes por la misma
-  validación (letras, números y guion bajo, hasta 32 caracteres), así que un
-  nombre con espacios o símbolos se rechaza sin llegar a la consola.
+  validación (letras, números y guion bajo, hasta 32 caracteres; los jugadores
+  de Bedrock pueden llevar un punto delante), así que un nombre con espacios o
+  símbolos se rechaza sin llegar a la consola.
 
 ### La imagen y la descripción del servidor
 
